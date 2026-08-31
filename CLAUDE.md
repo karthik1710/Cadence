@@ -10,7 +10,7 @@ Hard constraints: **no cloud STT, no cloud LLM, no external AI APIs, no telemetr
 
 `meeting-ai-app-PLAN.md` at the repo root is the authoritative spec — phased (Phase 0…15), with per-phase doc deliverables under `docs/`. Read the relevant plan section before implementing a phase. `docs/architecture.md` and `docs/models.md` record decisions already made and should be updated as architecture changes.
 
-Not a git repository yet. No test suite exists yet.
+Rust unit tests exist under `src-tauri/src/pipeline/` (`cargo test`). There is no frontend test suite.
 
 ## Commands
 
@@ -24,6 +24,11 @@ npm run build               # tsc typecheck + vite build
 npm run tauri build         # production Windows bundle
 cargo build                 # in src-tauri/ — Rust-only build
 cargo test                  # in src-tauri/ — Rust tests
+
+# headless pipeline run (audio → preprocess → diarize → STT → align), in src-tauri/
+cargo run --bin pipeline_cli -- <audio.wav> [out-dir]
+
+.\scripts\setup-models.ps1   # installs the native binaries + model weights the pipeline needs
 ```
 
 There is no ESLint / Prettier / JS test runner configured. `npm run build` (via `tsc`) is the only frontend check.
@@ -39,6 +44,8 @@ There is no ESLint / Prettier / JS test runner configured. `npm run build` (via 
 ## Project-specific gotchas
 
 - **whisper.cpp required flags.** Once whisper.cpp is wired up locally, always pass `--max-len 80 --split-on-word --max-context 0`. These are not tuning knobs — without them whisper.cpp silently collapsed a real ~13s span of speech into a short wrong sentence on actual meeting audio. Re-verify they hold on any new (esp. Tanglish) test audio. See `docs/models.md`.
+- **Never ship a native CLI's default thread count.** whisper.cpp defaults to 4 threads and sherpa-onnx to 1; on the target i9-13950HX that costs ~4× on the whole pipeline. `PipelineConfig` sets them per stage (STT scales to 24, diarization peaks at 8 and regresses past it). See `docs/performance.md`.
+- **sherpa-onnx's default cluster threshold over-splits speakers.** Its default (0.5) turned one dominant voice into 8 speaker ids on real audio; EchoMind defaults to 0.8. Provisional — it rests on one unlabelled sample, so re-test before trusting it on multi-speaker meetings. See `docs/models.md`.
 - **Language is `auto` / multilingual.** Meetings mix English, Tamil, and code-switched "Tanglish" (language changes mid-sentence). Never hard-code a single STT language.
 - **AI runtime is Rust-native, not Python.** Do not reach for Python libraries (faster-whisper, pyannote-audio, etc.) for pipeline stages — the shipped app must not depend on a Python/PyTorch runtime. Use native binaries/libraries (whisper.cpp, llama.cpp, ONNX-runtime-based diarization) per master prompt §19.
 - **Never silently lose a meeting.** Every failure path (mic disconnect, STT crash, invalid LLM JSON) must surface as a visible, recoverable error and preserve raw artifacts (`original.wav`, `stt.json`, `diarization.json` kept separate from derived `transcript.json`).

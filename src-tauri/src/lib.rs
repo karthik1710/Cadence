@@ -1,5 +1,6 @@
 mod audio;
 mod backend;
+pub mod pipeline;
 
 use audio::RecordingState;
 

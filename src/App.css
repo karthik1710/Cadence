@@ -263,6 +263,15 @@ button:disabled {
   padding-top: 0.15em;
 }
 
+.speaker {
+  flex-shrink: 0;
+  width: 5.5em;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  padding-top: 0.15em;
+}
+
 .transcript-text {
   flex: 1;
   line-height: 1.6;

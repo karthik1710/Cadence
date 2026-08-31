@@ -55,6 +55,14 @@ cargo run --bin pipeline_cli -- <audio.wav> [out-dir]
 
 `scripts/setup-models.ps1` installs the binaries and weights the pipeline expects into that same `<app_data_dir>/models` layout — dev-time stand-in for the Phase 13 Model Manager.
 
+## Tauri command surface
+
+`src-tauri/src/processing.rs` exposes the pipeline to the UI: `start_processing` (spawns the pipeline on a worker thread and returns immediately), `get_processing_status` (polled for the §12 stage and progress), `get_transcript` (reads `transcript.json`), and `check_models` (lets the UI warn about missing models *before* a meeting is recorded rather than after).
+
+Processing status lives in memory only — a `Mutex<HashMap<meeting_id, MeetingStatus>>`. An app restart loses progress but never artifacts: every stage's output is already on disk, and re-running the pipeline is the recovery path.
+
 ## Status
 
-Fully local, single-machine architecture. Done: audio capture (Phase 1), preprocessing/diarization/STT/alignment and the headless pipeline runner (Phases 4–5). Not yet started: STT and diarization benchmarks on Tamil/code-switched audio (Phases 2–3), LLM benchmark and MoM generation (Phases 6–7), and Tauri/UI integration (Phase 8 onward). `backend.rs` and the UI's backend-URL upload/poll flow are dead code from the superseded networked-backend design, removed when Phase 8 lands.
+Fully local, single-machine architecture, verified end-to-end: recording through speaker-labelled transcript, no network. The crate links no HTTP client — the old `backend.rs` and the UI's backend-URL field were deleted in Phase 8.
+
+Done: audio capture (1), alignment (4), headless pipeline runner (5), Tauri integration (8). Next: LLM benchmark (6) and MoM generation (7). Still unvalidated: STT and diarization benchmarks (2–3), including any Tamil/code-switched audio. See `meeting-ai-app-PLAN.md` §38 for the full phase status.

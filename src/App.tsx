@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 type MeetingState = "idle" | "starting" | "recording" | "stopping";
-type PipelineState = "idle" | "uploading" | "processing" | "completed" | "failed";
+type PipelineState = "idle" | "processing" | "completed" | "failed";
 
 interface AudioDeviceInfo {
   name: string;
@@ -24,18 +24,19 @@ interface MeetingStatus {
 }
 
 interface TranscriptSegment {
+  speaker: string;
+  speaker_label: string;
   start_ms: number;
   end_ms: number;
   text: string;
 }
 
-interface TranscriptResponse {
-  id: string;
+interface Transcript {
+  meeting_id: string;
   segments: TranscriptSegment[];
 }
 
 const DEFAULT_DEVICE_VALUE = "__default__";
-const DEFAULT_BACKEND_URL = "http://10.102.14.137:8090";
 
 function formatTime(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
@@ -58,7 +59,7 @@ function App() {
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineState>("idle");
   const [meetingId, setMeetingId] = useState<string | null>(null);
   const [pipelineStatus, setPipelineStatus] = useState<MeetingStatus | null>(null);
@@ -81,6 +82,11 @@ function App() {
 
   useEffect(() => {
     refreshDevices();
+    // Surfaced before recording, not after: a missing model must never be
+    // discovered only once a real meeting has already been captured.
+    invoke("check_models")
+      .then(() => setModelsError(null))
+      .catch((err) => setModelsError(String(err)));
   }, []);
 
   useEffect(() => {
@@ -126,10 +132,10 @@ function App() {
 
     statusPollRef.current = window.setInterval(async () => {
       try {
-        const s = await invoke<MeetingStatus>("get_meeting_status", { backendUrl, meetingId });
+        const s = await invoke<MeetingStatus>("get_processing_status", { meetingId });
         setPipelineStatus(s);
         if (s.status === "completed") {
-          const t = await invoke<TranscriptResponse>("get_transcript", { backendUrl, meetingId });
+          const t = await invoke<Transcript>("get_transcript", { meetingId });
           setTranscript(t.segments);
           setPipeline("completed");
         } else if (s.status === "failed") {
@@ -140,7 +146,7 @@ function App() {
         setPipelineError(String(err));
         setPipeline("failed");
       }
-    }, 3000);
+    }, 1000);
 
     return () => {
       if (statusPollRef.current !== null) {
@@ -148,7 +154,7 @@ function App() {
         statusPollRef.current = null;
       }
     };
-  }, [pipeline, meetingId, backendUrl]);
+  }, [pipeline, meetingId]);
 
   async function startMeeting() {
     setActionError(null);
@@ -165,6 +171,7 @@ function App() {
 
     try {
       await invoke("start_recording", { deviceName, meetingId: localMeetingId });
+      setMeetingId(localMeetingId);
       setStartedAt(new Date());
       setState("recording");
     } catch (err) {
@@ -177,26 +184,23 @@ function App() {
     setActionError(null);
     setState("stopping");
     try {
-      const summary = await invoke<RecordingSummary>("stop_recording");
+      await invoke<RecordingSummary>("stop_recording");
       setState("idle");
       setLevel(0);
-      await uploadAndProcess(summary);
+      await startProcessing();
     } catch (err) {
       setActionError(String(err));
       setState("idle");
     }
   }
 
-  async function uploadAndProcess(summary: RecordingSummary) {
-    setPipeline("uploading");
+  // Runs the whole pipeline on this machine. The recording is already saved
+  // on disk at this point, so a processing failure never costs the meeting.
+  async function startProcessing() {
+    if (!meetingId) return;
     setPipelineError(null);
     try {
-      const id = await invoke<string>("upload_and_process", {
-        backendUrl,
-        filePath: summary.file_path,
-        title: title || null,
-      });
-      setMeetingId(id);
+      await invoke("start_processing", { meetingId });
       setPipeline("processing");
     } catch (err) {
       setPipelineError(String(err));
@@ -206,7 +210,7 @@ function App() {
 
   const isRecording = state === "recording";
   const busy = state === "starting" || state === "stopping";
-  const pipelineBusy = pipeline === "uploading" || pipeline === "processing";
+  const pipelineBusy = pipeline === "processing";
 
   return (
     <main className="container">
@@ -238,16 +242,9 @@ function App() {
               </button>
             </div>
           </label>
-          <label className="field">
-            <span>Backend</span>
-            <input
-              value={backendUrl}
-              onChange={(e) => setBackendUrl(e.currentTarget.value)}
-              disabled={isRecording || busy}
-            />
-          </label>
         </div>
         {devicesError && <p className="notice error">{devicesError}</p>}
+        {modelsError && <p className="notice error">{modelsError}</p>}
       </section>
 
       <section className="card">
@@ -302,20 +299,26 @@ function App() {
           {pipelineBusy && (
             <p className="notice">
               <span className="spinner" />
-              {pipeline === "uploading"
-                ? "Uploading to backend…"
-                : `Processing${pipelineStatus?.stage ? ` — ${pipelineStatus.stage}` : ""}${
-                    pipelineStatus?.progress ? ` (${pipelineStatus.progress}%)` : ""
-                  }`}
+              {`Processing on this machine${pipelineStatus?.stage ? ` — ${pipelineStatus.stage}` : ""}${
+                pipelineStatus?.progress ? ` (${pipelineStatus.progress}%)` : ""
+              }`}
             </p>
           )}
-          {pipeline === "failed" && <p className="notice error">{pipelineError}</p>}
+          {pipeline === "failed" && (
+            <>
+              <p className="notice error">{pipelineError}</p>
+              <button type="button" className="ghost" onClick={startProcessing}>
+                Retry processing
+              </button>
+            </>
+          )}
           {pipeline === "completed" && transcript && (
             <div className="transcript">
               {transcript.length === 0 && <p className="notice">No speech detected.</p>}
               {transcript.map((seg, i) => (
                 <div key={i} className="transcript-segment">
                   <span className="timestamp">{formatTime(seg.start_ms)}</span>
+                  <span className="speaker">{seg.speaker_label}</span>
                   <span className="transcript-text">{seg.text}</span>
                 </div>
               ))}

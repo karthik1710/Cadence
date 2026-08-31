@@ -4,6 +4,9 @@ version = "0.1.0"
 description = "EchoMind — local-first meeting transcription and minutes-of-meeting app for Windows."
 license = "MIT"
 edition = "2021"
+# The crate has a second binary (pipeline_cli), so a bare `cargo run` — which
+# is what `tauri dev` issues — needs to be told which one is the app.
+default-run = "app"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,6 +27,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 cpal = "0.15"
 hound = "3.5"
-reqwest = { version = "0.12", features = ["blocking", "multipart", "json"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 

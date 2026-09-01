@@ -4,14 +4,12 @@ import { timecode } from "../../services/format";
 import { useRecorder } from "../../hooks/useRecorder";
 import { useProcessingStatus } from "../../hooks/useProcessingStatus";
 import { Card, LevelMeter, Notice, Spinner, StageChecklist } from "../../components/ui";
-import { RecommendedSetupBanner } from "../../components/RecommendedSetup";
 import type { ModelStatus } from "../../types";
 
 interface Props {
   onOpenMeeting: (id: string) => void;
   setupReady: boolean;
   missingModels: ModelStatus[];
-  onSetupChanged: () => void;
   onOpenSettings: () => void;
 }
 
@@ -29,7 +27,6 @@ export function RecordingPanel({
   onOpenMeeting,
   setupReady,
   missingModels,
-  onSetupChanged,
   onOpenSettings,
 }: Props) {
   const recorder = useRecorder();
@@ -106,11 +103,15 @@ export function RecordingPanel({
   return (
     <div className="recording-panel">
       {!setupReady && (
-        <RecommendedSetupBanner
-          missing={missingModels}
-          onChanged={onSetupChanged}
-          onOpenSettings={onOpenSettings}
-        />
+        <Notice kind="warning">
+          {missingModels.length} component{missingModels.length === 1 ? "" : "s"} needed for
+          transcription and minutes {missingModels.length === 1 ? "isn't" : "aren't"} installed
+          yet.{" "}
+          <button type="button" className="link" onClick={onOpenSettings}>
+            Install them from Settings
+          </button>{" "}
+          whenever you're ready — recording works either way.
+        </Notice>
       )}
 
       <Card title="New meeting">
@@ -180,7 +181,7 @@ export function RecordingPanel({
           <button
             type="button"
             className={recording ? "danger" : "primary"}
-            disabled={busy || (!recording && !setupReady)}
+            disabled={busy}
             onClick={recording ? stopMeeting : startMeeting}
           >
             {recording ? "Stop Meeting" : "Start Meeting"}

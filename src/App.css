@@ -559,43 +559,6 @@ code,
   color: var(--text);
 }
 
-/* --- recommended setup banner (§27) ---------------------------------------- */
-
-.recommended-setup {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-6);
-  flex-wrap: wrap;
-}
-
-.recommended-setup-copy h2 {
-  background: var(--accent-strong);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.recommended-setup-copy p {
-  margin: var(--sp-2) 0 0;
-  max-width: 46rem;
-}
-
-.recommended-setup-action {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-shrink: 0;
-}
-
-.recommended-setup-progress {
-  margin-top: var(--sp-4);
-}
-
-.recommended-setup-progress .progress-track {
-  max-width: none;
-}
-
 /* --- form controls -------------------------------------------------------- */
 
 .field-row {

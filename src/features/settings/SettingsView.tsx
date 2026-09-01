@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../../services/api";
 import { sizeLabel } from "../../services/format";
 import { Card, Notice, Spinner } from "../../components/ui";
-import { RecommendedSetupBanner } from "../../components/RecommendedSetup";
 import type {
   HostReport,
   InstallProgress,
@@ -192,21 +191,9 @@ export function SettingsView({ onSetupChanged, onThemeSaved }: Props) {
   const installedOf = (kind: ModelKind) =>
     models.filter((model) => model.kind === kind && model.installed);
 
-  const missingRequired = models.filter((model) => model.required && !model.installed);
-
   return (
     <div className="settings-view">
       {error && <Notice kind="error">{error}</Notice>}
-
-      {missingRequired.length > 0 && (
-        <RecommendedSetupBanner
-          missing={missingRequired}
-          onChanged={() => {
-            refreshModels();
-            onSetupChanged();
-          }}
-        />
-      )}
 
       <Card title="This machine">
         {!host ? (
@@ -301,7 +288,11 @@ export function SettingsView({ onSetupChanged, onThemeSaved }: Props) {
                       <tr key={model.id}>
                         <td>
                           <span className="model-label">{model.label}</span>
-                          {model.required && <span className="marker">Required</span>}
+                          {model.required ? (
+                            <span className="marker warning">Required</span>
+                          ) : (
+                            <span className="marker">Suggested</span>
+                          )}
                           {model.notes && <span className="model-notes">{model.notes}</span>}
                           {current && (
                             <>
@@ -533,8 +524,9 @@ export function SettingsView({ onSetupChanged, onThemeSaved }: Props) {
               </label>
             </div>
             <p className="muted">
-              0.8 is provisional — it rests on one unlabelled sample. Lower it if one
-              person is split across several speakers, raise it if two people are merged.
+              0.5 is provisional — it rests on two small samples that disagreed. Raise it
+              if one person is split across several speakers, lower it if two people are
+              merged into one.
             </p>
 
             <div className="field-row">

@@ -126,7 +126,6 @@ function App() {
                 onOpenMeeting={setOpenMeetingId}
                 setupReady={setupStatus?.ready ?? false}
                 missingModels={setupStatus?.missing ?? []}
-                onSetupChanged={refreshSetup}
                 onOpenSettings={openSettings}
               />
             )}

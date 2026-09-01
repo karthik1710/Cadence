@@ -147,7 +147,7 @@ pub fn selected_llm_entry(settings: &Settings) -> Option<&'static models_manager
 /// same models the desktop app uses.
 pub fn default_data_dir() -> Result<PathBuf, String> {
     std::env::var("APPDATA")
-        .map(|appdata| PathBuf::from(appdata).join("com.echomind.app"))
+        .map(|appdata| PathBuf::from(appdata).join("com.cadence.app"))
         .map_err(|_| "APPDATA is not set — pass a data dir explicitly".to_string())
 }
 
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn nothing_is_installed_in_an_empty_data_dir() {
-        let dir = std::env::temp_dir().join("echomind-paths-empty");
+        let dir = std::env::temp_dir().join("cadence-paths-empty");
         let _ = std::fs::remove_dir_all(&dir);
         let settings = Settings::default();
         let paths = ModelPaths::unchecked(&dir, &settings);
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn turning_off_mom_drops_the_llm_requirement() {
-        let dir = std::env::temp_dir().join("echomind-paths-nollm");
+        let dir = std::env::temp_dir().join("cadence-paths-nollm");
         let _ = std::fs::remove_dir_all(&dir);
         let settings = Settings {
             generate_mom: false,

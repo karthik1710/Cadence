@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn reports_a_missing_binary_clearly() {
-        let err = run_measured(Command::new("echomind-no-such-binary")).unwrap_err();
+        let err = run_measured(Command::new("cadence-no-such-binary")).unwrap_err();
         assert!(err.contains("failed to launch"));
     }
 

@@ -54,7 +54,7 @@ function App() {
           <div className="app-header-titles">
             <h1>
               <AppLogo size={30} />
-              <span>EchoMind</span>
+              <span>Cadence</span>
             </h1>
             <p className="subtitle">Local meeting intelligence · nothing leaves this computer</p>
           </div>

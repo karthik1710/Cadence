@@ -1,6 +1,6 @@
 <div align="center">
 
-# EchoMind
+# Cadence
 
 **Local-first meeting transcription and minutes-of-meeting, entirely on your laptop.**
 
@@ -16,11 +16,11 @@ No cloud STT. No cloud LLM. No telemetry. No internet required after setup.
 
 ---
 
-EchoMind records a physical meeting from a microphone and, entirely on the same machine, turns it into a speaker-labelled transcript and a structured Minutes of Meeting (MoM) — decisions, action items, open questions, risks. Nothing leaves the laptop: no audio, no transcript, and no meeting content is ever sent to a cloud API or a remote server.
+Cadence records a physical meeting from a microphone and, entirely on the same machine, turns it into a speaker-labelled transcript and a structured Minutes of Meeting (MoM) — decisions, action items, open questions, risks. Nothing leaves the laptop: no audio, no transcript, and no meeting content is ever sent to a cloud API or a remote server.
 
 It's built for real-world mixed-language meetings: **English, Tamil, and code-switched "Tanglish" within the same sentence** are all first-class, not an afterthought.
 
-> **Why local-first?** Meeting audio is some of the most sensitive data an organization produces — strategy, personnel decisions, unreleased plans. EchoMind's answer is architectural, not a privacy policy: the AI runtime is Rust-orchestrated native binaries only, so there is no cloud dependency to misconfigure and no telemetry to opt out of.
+> **Why local-first?** Meeting audio is some of the most sensitive data an organization produces — strategy, personnel decisions, unreleased plans. Cadence's answer is architectural, not a privacy policy: the AI runtime is Rust-orchestrated native binaries only, so there is no cloud dependency to misconfigure and no telemetry to opt out of.
 
 ## Features
 
@@ -87,7 +87,7 @@ cargo test                # from src-tauri/ — Rust unit tests
 ## Project structure
 
 ```text
-EchoMind/
+Cadence/
 ├── src/                    # React UI
 ├── src-tauri/              # Rust: native commands, audio capture, AI pipeline orchestration
 ├── docs/                   # architecture, model selection, and other living decision docs

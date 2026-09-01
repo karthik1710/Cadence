@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Fetches the native AI binaries and model weights EchoMind's local pipeline
+  Fetches the native AI binaries and model weights Cadence's local pipeline
   needs (whisper.cpp, llama.cpp, sherpa-onnx + their model files) into the
   same directory the shipped app resolves at runtime (see
   src-tauri/src/pipeline/paths.rs). Dev-time convenience only — this is not
@@ -11,7 +11,7 @@
 
 $ErrorActionPreference = "Stop"
 
-$AppDataDir = Join-Path $env:APPDATA "com.echomind.app"
+$AppDataDir = Join-Path $env:APPDATA "com.cadence.app"
 $ModelsDir = Join-Path $AppDataDir "models"
 $BinDir = Join-Path $ModelsDir "bin"
 $SttDir = Join-Path $ModelsDir "stt"

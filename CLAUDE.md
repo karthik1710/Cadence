@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-EchoMind is a local-first meeting transcription system: a single Windows desktop app (Tauri 2 + React 19 + TypeScript + Rust) that records a physical meeting from a USB/laptop mic and, entirely on that same machine, runs speech-to-text, speaker diarization, timestamp/speaker alignment, and LLM-based meeting-minutes (MoM) generation. There is no separate backend and no second machine — the app owns the full pipeline and all meeting data locally.
+Cadence is a local-first meeting transcription system: a single Windows desktop app (Tauri 2 + React 19 + TypeScript + Rust) that records a physical meeting from a USB/laptop mic and, entirely on that same machine, runs speech-to-text, speaker diarization, timestamp/speaker alignment, and LLM-based meeting-minutes (MoM) generation. There is no separate backend and no second machine — the app owns the full pipeline and all meeting data locally.
 
 Hard constraints: **no cloud STT, no cloud LLM, no external AI APIs, no telemetry, no networked backend.** The AI runtime is Rust-orchestrated native binaries/libraries only (whisper.cpp, llama.cpp, an ONNX-based diarization/VAD library) — no Python or PyTorch ships in the app. After models are installed, the app must run with the Internet fully disconnected. V1 targets post-meeting processing (5–10 min latency acceptable), not real-time.
 
@@ -51,7 +51,7 @@ There is no ESLint / Prettier / JS test runner configured. `npm run build` (via 
 
 - **whisper.cpp required flags.** Once whisper.cpp is wired up locally, always pass `--max-len 80 --split-on-word --max-context 0`. These are not tuning knobs — without them whisper.cpp silently collapsed a real ~13s span of speech into a short wrong sentence on actual meeting audio. Re-verify they hold on any new (esp. Tanglish) test audio. See `docs/models.md`.
 - **Never ship a native CLI's default thread count.** whisper.cpp defaults to 4 threads and sherpa-onnx to 1; on the target i9-13950HX that costs ~4× on the whole pipeline. `PipelineConfig` sets them per stage (STT scales to 24, diarization peaks at 8 and regresses past it). See `docs/performance.md`.
-- **sherpa-onnx's default cluster threshold over-splits speakers.** Its default (0.5) turned one dominant voice into 8 speaker ids on real audio; EchoMind defaults to 0.8. Provisional — it rests on one unlabelled sample, so re-test before trusting it on multi-speaker meetings. See `docs/models.md`.
+- **sherpa-onnx's default cluster threshold over-splits speakers.** Its default (0.5) turned one dominant voice into 8 speaker ids on real audio; Cadence defaults to 0.8. Provisional — it rests on one unlabelled sample, so re-test before trusting it on multi-speaker meetings. See `docs/models.md`.
 - **Language is `auto` / multilingual.** Meetings mix English, Tamil, and code-switched "Tanglish" (language changes mid-sentence). Never hard-code a single STT language.
 - **AI runtime is Rust-native, not Python.** Do not reach for Python libraries (faster-whisper, pyannote-audio, etc.) for pipeline stages — the shipped app must not depend on a Python/PyTorch runtime. Use native binaries/libraries (whisper.cpp, llama.cpp, ONNX-runtime-based diarization) per master prompt §19.
 - **Never silently lose a meeting.** Every failure path (mic disconnect, STT crash, invalid LLM JSON) must surface as a visible, recoverable error and preserve raw artifacts (`original.wav`, `stt.json`, `diarization.json` kept separate from derived `transcript.json`).

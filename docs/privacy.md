@@ -1,6 +1,6 @@
 # Privacy
 
-EchoMind's privacy model is architectural, not a policy statement: the app cannot send meeting content anywhere because the code paths to do so do not exist in the shipped binary. This doc says exactly what is captured, where it lives, what does and doesn't leave the machine, what's logged, how deletion works, and the honest limits of the model-integrity story. See `meeting-ai-app-PLAN.md` §1, §28, §33–35 for the requirements this implements.
+Cadence's privacy model is architectural, not a policy statement: the app cannot send meeting content anywhere because the code paths to do so do not exist in the shipped binary. This doc says exactly what is captured, where it lives, what does and doesn't leave the machine, what's logged, how deletion works, and the honest limits of the model-integrity story. See `meeting-ai-app-PLAN.md` §1, §28, §33–35 for the requirements this implements.
 
 ## What is captured
 
@@ -19,7 +19,7 @@ None of this is created, read, or transmitted by anything other than the app its
 
 ## It never leaves the machine
 
-**No telemetry.** EchoMind does not phone home. There is no analytics SDK, crash reporter, or update-check network call in the pipeline or UI code.
+**No telemetry.** Cadence does not phone home. There is no analytics SDK, crash reporter, or update-check network call in the pipeline or UI code.
 
 **No cloud STT, no cloud LLM.** Speech-to-text (whisper.cpp), diarization (sherpa-onnx), and minutes generation (llama.cpp) are native processes spawned and driven locally. The crate that ships as the app links no HTTP client for any of this — `cargo tree | grep reqwest` (or any other HTTP-client crate) returns nothing, and that's checked precisely because it makes "no cloud path snuck in" a one-line, binary-answer check rather than something that has to be re-argued by reading every module.
 

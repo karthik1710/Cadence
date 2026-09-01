@@ -241,7 +241,7 @@ pub fn warnings_for(profile: &AudioProfile) -> Vec<String> {
 
     if profile.dc_offset.abs() > DC_OFFSET_LIMIT {
         warnings.push(
-            "This microphone adds a constant electrical offset to the signal. EchoMind removes it automatically before transcribing, but another microphone or an updated audio driver would give cleaner recordings."
+            "This microphone adds a constant electrical offset to the signal. Cadence removes it automatically before transcribing, but another microphone or an updated audio driver would give cleaner recordings."
                 .to_string(),
         );
     }
@@ -475,7 +475,7 @@ mod tests {
 
     #[test]
     fn profiles_a_wav_file_end_to_end() {
-        let dir = std::env::temp_dir().join("echomind-profile-wav");
+        let dir = std::env::temp_dir().join("cadence-profile-wav");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("t.wav");
@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn a_missing_meeting_recording_is_a_clear_error() {
-        let dir = std::env::temp_dir().join("echomind-profile-missing");
+        let dir = std::env::temp_dir().join("cadence-profile-missing");
         let _ = std::fs::remove_dir_all(&dir);
         let err = profile_meeting(&dir, "nope").unwrap_err();
         assert!(err.contains("No recording found"));

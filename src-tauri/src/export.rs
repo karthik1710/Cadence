@@ -84,7 +84,7 @@ pub fn render_json(
         },
         "mom": mom,
         "transcript": transcript,
-        "generatedBy": "EchoMind (local processing, no cloud services)",
+        "generatedBy": "Cadence (local processing, no cloud services)",
     });
     serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
 }
@@ -178,7 +178,7 @@ pub fn render_markdown(
         }
     }
 
-    out.push_str("\n---\n\nGenerated locally by EchoMind. No cloud services were used.\n");
+    out.push_str("\n---\n\nGenerated locally by Cadence. No cloud services were used.\n");
     out
 }
 
@@ -411,7 +411,7 @@ mod tests {
 
     #[test]
     fn writes_both_formats_into_the_meetings_exports_dir() {
-        let dir = std::env::temp_dir().join("echomind-export-test");
+        let dir = std::env::temp_dir().join("cadence-export-test");
         let _ = std::fs::remove_dir_all(&dir);
         let meta = meta();
         storage::write_metadata(&dir, &meta).unwrap();
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn refuses_to_export_a_meeting_with_nothing_in_it() {
-        let dir = std::env::temp_dir().join("echomind-export-empty");
+        let dir = std::env::temp_dir().join("cadence-export-empty");
         let _ = std::fs::remove_dir_all(&dir);
         storage::write_metadata(&dir, &meta()).unwrap();
         assert!(write_export(&dir, "abcdef123456", Format::Markdown).is_err());

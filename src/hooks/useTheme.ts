@@ -3,7 +3,7 @@ import * as api from "../services/api";
 
 export type Theme = "light" | "dark";
 
-const STORAGE_KEY = "echomind-theme";
+const STORAGE_KEY = "cadence-theme";
 
 /** Anything other than exactly "light" is dark — the fail-safe default. */
 function normalize(value: string | null | undefined): Theme {

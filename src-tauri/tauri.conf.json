@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "EchoMind",
+  "productName": "Cadence",
   "version": "0.1.0",
-  "identifier": "com.echomind.app",
+  "identifier": "com.cadence.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "EchoMind",
+        "title": "Cadence",
         "width": 1100,
         "height": 760,
         "minWidth": 800,

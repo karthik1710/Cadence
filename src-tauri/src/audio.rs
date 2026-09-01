@@ -571,7 +571,7 @@ pub fn test_microphone(
         record_sample(device_name, Duration::from_secs(seconds as u64))?;
     if samples.is_empty() {
         return Err(
-            "The microphone produced no audio. Check that it is connected and that Windows lets EchoMind use it."
+            "The microphone produced no audio. Check that it is connected and that Windows lets Cadence use it."
                 .to_string(),
         );
     }

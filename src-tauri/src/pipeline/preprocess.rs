@@ -599,7 +599,7 @@ mod tests {
 
     #[test]
     fn preprocess_writes_a_16k_mono_file_and_leaves_the_original_alone() {
-        let dir = std::env::temp_dir().join("echomind-preprocess-chain");
+        let dir = std::env::temp_dir().join("cadence-preprocess-chain");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let input = dir.join("original.wav");
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn apply_gain_only_touches_the_level() {
-        let dir = std::env::temp_dir().join("echomind-preprocess-gain");
+        let dir = std::env::temp_dir().join("cadence-preprocess-gain");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let input = dir.join("in.wav");
@@ -656,7 +656,7 @@ mod tests {
 
     #[test]
     fn wav_round_trips_through_16_bit_without_wrapping() {
-        let dir = std::env::temp_dir().join("echomind-preprocess-roundtrip");
+        let dir = std::env::temp_dir().join("cadence-preprocess-roundtrip");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("full-scale.wav");

@@ -92,7 +92,7 @@ impl CatalogEntry {
     }
 }
 
-/// Every runtime and model EchoMind knows how to install.
+/// Every runtime and model Cadence knows how to install.
 pub fn catalog() -> &'static [CatalogEntry] {
     &[
         CatalogEntry {
@@ -793,7 +793,7 @@ mod tests {
 
     #[test]
     fn an_optional_audio_model_can_be_removed_again() {
-        let dir = std::env::temp_dir().join("echomind-remove-optional");
+        let dir = std::env::temp_dir().join("cadence-remove-optional");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("vad")).unwrap();
         let path = entry("vad-silero").unwrap().path_in(&dir);
@@ -805,7 +805,7 @@ mod tests {
 
     #[test]
     fn hashes_a_known_value() {
-        let dir = std::env::temp_dir().join("echomind-sha-test");
+        let dir = std::env::temp_dir().join("cadence-sha-test");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("abc.txt");
         std::fs::write(&path, b"abc").unwrap();

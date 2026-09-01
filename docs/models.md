@@ -4,7 +4,7 @@ Living document — updated as benchmarks (master prompt Phases 2, 3, 6) produce
 
 ## LLM (MoM generation)
 
-**No benchmark has been run yet.** Benchmarking *infrastructure* now exists — `cargo run --release --bin bench_cli -- llm <transcript.json> [--models qwen3-4b-q4,qwen3-8b-q4,gemma3-4b-q4]` runs `mom::generate` against each candidate on an identical transcript and prints a Markdown table (wall time, peak RAM, JSON validity/repair rate, and counts of decisions/actions/questions/risks per §30's rubric). It has not been executed: this environment has no Rust toolchain available to compile and run it, so the code is written and unit-tested at the level `cargo test` reaches (mocked `LlmProvider`, no real model load) but has never been run end to end against a real `llama-server.exe`. Do not read anything below as a benchmark result — it is the catalog EchoMind ships with, not a ranking.
+**No benchmark has been run yet.** Benchmarking *infrastructure* now exists — `cargo run --release --bin bench_cli -- llm <transcript.json> [--models qwen3-4b-q4,qwen3-8b-q4,gemma3-4b-q4]` runs `mom::generate` against each candidate on an identical transcript and prints a Markdown table (wall time, peak RAM, JSON validity/repair rate, and counts of decisions/actions/questions/risks per §30's rubric). It has not been executed: this environment has no Rust toolchain available to compile and run it, so the code is written and unit-tested at the level `cargo test` reaches (mocked `LlmProvider`, no real model load) but has never been run end to end against a real `llama-server.exe`. Do not read anything below as a benchmark result — it is the catalog Cadence ships with, not a ranking.
 
 **Catalog** (`models_manager::catalog()`), all GGUF via llama.cpp:
 
@@ -46,7 +46,7 @@ Running: sherpa-onnx offline speaker diarization (pyannote segmentation 3.0 + We
 | 0.8 | 4 | consolidated, second voice still separate (4.6s) |
 | 0.9 | 2 | second voice largely absorbed into the first |
 
-EchoMind therefore ships **0.8** as its default (`DEFAULT_CLUSTER_THRESHOLD` in `pipeline/mod.rs`), not sherpa-onnx's 0.5. This is provisional and rests on a single unlabelled sample: it establishes only that 0.5 is wrong here. Phase 3 needs labelled 3/5/10-speaker recordings — with real headcounts — to settle it, and should also test `--clustering.num-clusters` for the case where the organizer knows the headcount.
+Cadence therefore ships **0.8** as its default (`DEFAULT_CLUSTER_THRESHOLD` in `pipeline/mod.rs`), not sherpa-onnx's 0.5. This is provisional and rests on a single unlabelled sample: it establishes only that 0.5 is wrong here. Phase 3 needs labelled 3/5/10-speaker recordings — with real headcounts — to settle it, and should also test `--clustering.num-clusters` for the case where the organizer knows the headcount.
 
 **Known limitation.** Alignment attributes each STT segment to whichever speaker holds most of it (see `docs/architecture.md`), so a fast two-way exchange inside one whisper segment collapses onto the dominant speaker. On the test recording a 30s stretch of back-and-forth rendered as one Person 1 turn. Fixing it properly needs word-level timestamps from STT or finer diarization segments — evaluate during Phase 3/4 refinement, not by tuning the merge gap.
 

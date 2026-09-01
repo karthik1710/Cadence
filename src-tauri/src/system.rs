@@ -1,7 +1,7 @@
 //! Host-hardware facts the pipeline has to adapt to, and the memory profile
 //! derived from them.
 //!
-//! EchoMind's reference machine (master prompt §1) has 32 GB of RAM, but the
+//! Cadence's reference machine (master prompt §1) has 32 GB of RAM, but the
 //! app is expected to run on 16 GB laptops too. RAM is the constraint that
 //! actually decides which LLM can be loaded, so it is measured at runtime
 //! rather than assumed: see [`MemoryProfile::detect`].
@@ -186,7 +186,7 @@ fn physical_memory_mb() -> (u64, u64) {
 
 #[cfg(not(windows))]
 fn physical_memory_mb() -> (u64, u64) {
-    // EchoMind ships on Windows only (§35); this branch exists so the crate's
+    // Cadence ships on Windows only (§35); this branch exists so the crate's
     // unit tests can run anywhere.
     (32_768, 16_384)
 }

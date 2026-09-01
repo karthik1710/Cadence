@@ -622,7 +622,7 @@ not a segment
 
     #[test]
     fn trimming_a_real_file_matches_the_timeline_it_returns() {
-        let dir = std::env::temp_dir().join("echomind-vad-trim");
+        let dir = std::env::temp_dir().join("cadence-vad-trim");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let input = dir.join("processed.wav");
@@ -656,7 +656,7 @@ not a segment
 
     #[test]
     fn trimming_refuses_when_there_is_no_speech_to_keep() {
-        let dir = std::env::temp_dir().join("echomind-vad-nospeech");
+        let dir = std::env::temp_dir().join("cadence-vad-nospeech");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let input = dir.join("in.wav");
@@ -668,7 +668,7 @@ not a segment
 
     #[test]
     fn availability_is_false_in_an_empty_data_dir() {
-        let dir = std::env::temp_dir().join("echomind-vad-missing");
+        let dir = std::env::temp_dir().join("cadence-vad-missing");
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!is_available(&dir));
         assert!(model_path(&dir).to_string_lossy().contains("silero"));

@@ -4,7 +4,7 @@ Standing brief for any coding agent (Claude Code, Codex, or similar) working in 
 
 ## Project
 
-EchoMind is a local-first meeting transcription and MoM (minutes of meeting) app for Windows: a single Tauri + React/TypeScript + Rust desktop app that records, transcribes, diarizes, and summarizes meetings entirely on the laptop. No cloud STT, no cloud LLM, no external AI APIs, no telemetry, no networked backend. [meeting-ai-app-PLAN.md](meeting-ai-app-PLAN.md) is the authoritative spec — re-read the relevant section before starting a phase, and report progress against it at the end of one.
+Cadence is a local-first meeting transcription and MoM (minutes of meeting) app for Windows: a single Tauri + React/TypeScript + Rust desktop app that records, transcribes, diarizes, and summarizes meetings entirely on the laptop. No cloud STT, no cloud LLM, no external AI APIs, no telemetry, no networked backend. [meeting-ai-app-PLAN.md](meeting-ai-app-PLAN.md) is the authoritative spec — re-read the relevant section before starting a phase, and report progress against it at the end of one.
 
 Using a cloud coding assistant (this one included) during development does not violate the runtime's offline requirement — the constraint is on the shipped app, not the development process.
 

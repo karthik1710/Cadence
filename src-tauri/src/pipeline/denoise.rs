@@ -6,7 +6,7 @@
 //! keeps it inside the §29 budget.
 //!
 //! It is deliberately **optional** (not in `models_manager::required_ids`):
-//! nothing about EchoMind stops working without it, and §33 says a processing
+//! nothing about Cadence stops working without it, and §33 says a processing
 //! stage must never cost a meeting. So a missing model is a logged skip, not a
 //! failure, and even a denoiser that crashes mid-run leaves the pipeline with
 //! the perfectly usable un-denoised audio it started from.
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn an_uninstalled_denoiser_reports_which_half_is_missing() {
-        let dir = empty_dir("echomind-denoise-missing");
+        let dir = empty_dir("cadence-denoise-missing");
         assert!(!is_available(&dir));
         let reason = unavailable_reason(&dir).unwrap();
         assert!(reason.contains("binary is not installed"), "{reason}");
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn denoising_without_the_model_is_an_error_the_pipeline_can_skip_on() {
-        let dir = empty_dir("echomind-denoise-skip");
+        let dir = empty_dir("cadence-denoise-skip");
         let err = denoise(&dir, 4, Path::new("in.wav"), Path::new("out.wav")).unwrap_err();
         assert!(err.contains("not installed"));
         let _ = std::fs::remove_dir_all(&dir);

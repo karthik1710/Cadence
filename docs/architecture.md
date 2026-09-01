@@ -1,11 +1,11 @@
-# EchoMind — Architecture
+# Cadence — Architecture
 
 ## Repository layout
 
 Single Tauri desktop app, living at the repo root — no second machine, no networked backend:
 
 ```text
-EchoMind/
+Cadence/
 ├── src/                  # React UI
 ├── src-tauri/src/        # Rust: audio capture, AI pipeline orchestration
 ├── docs/                 # architecture.md, models.md, privacy.md, performance.md, model-benchmark.md
@@ -92,7 +92,7 @@ This tiering is why nothing else in the pipeline hard-codes "32 GB": `ModelPaths
 
 **Catalog.** `catalog()` is a static list of every installable item — three runtimes (whisper.cpp, llama.cpp, sherpa-onnx) and their model weights (three Whisper sizes, Qwen3-4B/8B Q4_K_M, Gemma3-4B Q4_K_M, the two diarization ONNX models). Each entry carries its download URL, where it installs under `<app_data_dir>/models`, and the file that must exist for it to count as installed. `required_ids(profile)` derives which subset a given `MemoryProfile` actually needs, which is what `pipeline::paths::ModelPaths::missing` and the first-run setup screen use to say exactly what's absent rather than a generic "models missing" error (§33).
 
-**No HTTP client dependency.** Downloads shell out to `curl.exe` and archive extraction to `tar.exe` (bsdtar) — both ship with Windows 10 1803+/11, so nothing new has to be installed. This is a deliberate structural choice, not a convenience: EchoMind's core invariant is that the crate links no HTTP/network stack for anything AI-related (`cargo tree | grep reqwest` finding nothing), and that invariant is cheap to check specifically because it's binary — either some crate pulls in an HTTP implementation or none does. Shelling out to Windows' own CLI tools for a manual, user-initiated, one-time model download keeps that check meaningful. `pipeline/llm/http.rs` follows the same logic in the opposite direction: it needs to talk to `llama-server.exe` over HTTP as an IPC mechanism (the same role stdin/stdout plays for whisper.cpp and sherpa-onnx), so rather than pull in `reqwest` it hand-rolls a client that can only ever address `127.0.0.1:<port>` — the host isn't even a parameter, only the port is, so there's no code path that could point it anywhere else even by mistake.
+**No HTTP client dependency.** Downloads shell out to `curl.exe` and archive extraction to `tar.exe` (bsdtar) — both ship with Windows 10 1803+/11, so nothing new has to be installed. This is a deliberate structural choice, not a convenience: Cadence's core invariant is that the crate links no HTTP/network stack for anything AI-related (`cargo tree | grep reqwest` finding nothing), and that invariant is cheap to check specifically because it's binary — either some crate pulls in an HTTP implementation or none does. Shelling out to Windows' own CLI tools for a manual, user-initiated, one-time model download keeps that check meaningful. `pipeline/llm/http.rs` follows the same logic in the opposite direction: it needs to talk to `llama-server.exe` over HTTP as an IPC mechanism (the same role stdin/stdout plays for whisper.cpp and sherpa-onnx), so rather than pull in `reqwest` it hand-rolls a client that can only ever address `127.0.0.1:<port>` — the host isn't even a parameter, only the port is, so there's no code path that could point it anywhere else even by mistake.
 
 **Integrity: trust-on-first-install.** The catalog carries no pinned SHA-256 hashes — inventing digests that were never checked against the real upstream files would be worse than having none. Instead, `install()` computes the SHA-256 of every file right after installing it and records it in `<app_data_dir>/models/manifest.json`. `verify()` recomputes and compares: it catches corruption, truncation, or post-install tampering, but it cannot detect a first download that was already compromised (e.g. a poisoned release asset or a MITM'd `curl.exe` run, though TLS covers the latter). This is documented, not hidden — see `docs/privacy.md`. `remove()` refuses to delete a model the current profile still needs, so a user cannot leave the app unable to process a meeting by accident.
 
@@ -152,7 +152,7 @@ The LLM itself runs behind the `LlmProvider` trait (`pipeline/llm/mod.rs`); `Lla
 
 ## Export (§26)
 
-`src-tauri/src/export.rs` renders Markdown and JSON (PDF/DOCX remain out of V1 scope, per the plan). Both formats are written into the meeting's own `meetings/<id>/exports/` directory, so deleting the meeting deletes its exports too, and both apply any user-assigned speaker renames (§23) consistently across the transcript and the minutes — a rename is keyed by the stable speaker id (`SPEAKER_00`) and applied to the presentation label (`Person 1`) wherever it appears, so it can never apply to the transcript and not the MoM or vice versa. Markdown includes a meeting-info header, participants, executive summary, topics/decisions/questions/risks/discussion (each with its evidence — timestamp and/or speaker where the grounding step kept one), action items with owner/deadline/confidence, and the full transcript; JSON is the same content structured for programmatic reuse, tagged `"generatedBy": "EchoMind (local processing, no cloud services)"`.
+`src-tauri/src/export.rs` renders Markdown and JSON (PDF/DOCX remain out of V1 scope, per the plan). Both formats are written into the meeting's own `meetings/<id>/exports/` directory, so deleting the meeting deletes its exports too, and both apply any user-assigned speaker renames (§23) consistently across the transcript and the minutes — a rename is keyed by the stable speaker id (`SPEAKER_00`) and applied to the presentation label (`Person 1`) wherever it appears, so it can never apply to the transcript and not the MoM or vice versa. Markdown includes a meeting-info header, participants, executive summary, topics/decisions/questions/risks/discussion (each with its evidence — timestamp and/or speaker where the grounding step kept one), action items with owner/deadline/confidence, and the full transcript; JSON is the same content structured for programmatic reuse, tagged `"generatedBy": "Cadence (local processing, no cloud services)"`.
 
 ## Status
 

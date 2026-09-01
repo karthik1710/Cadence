@@ -18,7 +18,7 @@ interface Props {
 /**
  * The one-click "install what this machine needs" action (§27).
  *
- * EchoMind already picks the right model for the machine's RAM tier —
+ * Cadence already picks the right model for the machine's RAM tier —
  * `Settings.stt_model`/`llm_model` default to `null`, which resolves to
  * `MemoryProfile::default_*` — so there is nothing to *choose* here, only
  * something to *fetch*. This exists so a first-time user does not have to
@@ -79,7 +79,7 @@ export function RecommendedSetupBanner({ missing, onChanged, onOpenSettings }: P
         <div className="recommended-setup-copy">
           <h2>Recommended setup for this machine{host ? ` (${sizeLabel(host.total_ram_mb)} RAM)` : ""}</h2>
           <p className="muted">
-            EchoMind picks the speech and language models that fit this machine's memory
+            Cadence picks the speech and language models that fit this machine's memory
             automatically — {host ? `${host.recommended_stt} for speech and ${host.recommended_llm} for minutes` : "a smaller or larger model depending on available RAM"}
             . {missing.length} component{missing.length === 1 ? "" : "s"} still need
             downloading (about {sizeLabel(totalMb)} total), one time, after which everything

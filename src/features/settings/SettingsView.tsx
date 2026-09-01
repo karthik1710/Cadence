@@ -259,7 +259,7 @@ export function SettingsView({ onSetupChanged, onThemeSaved }: Props) {
               </div>
             </dl>
             <p className="muted">
-              EchoMind picks a smaller language model and a shorter context on machines
+              Cadence picks a smaller language model and a shorter context on machines
               with less RAM: a 16 GB laptop gets the 4B model, a 32 GB one gets the 8B.
             </p>
           </>

@@ -271,7 +271,7 @@ mod tests {
 
     #[test]
     fn theme_round_trips_through_disk() {
-        let dir = std::env::temp_dir().join("echomind-settings-theme-test");
+        let dir = std::env::temp_dir().join("cadence-settings-theme-test");
         let _ = std::fs::remove_dir_all(&dir);
         let mut s = Settings::default();
         s.theme = "light".to_string();
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn round_trips_through_disk() {
-        let dir = std::env::temp_dir().join("echomind-settings-test");
+        let dir = std::env::temp_dir().join("cadence-settings-test");
         let _ = std::fs::remove_dir_all(&dir);
         let mut s = Settings::default();
         s.mom_language = "Tamil".to_string();
@@ -312,7 +312,7 @@ mod tests {
 
     #[test]
     fn a_settings_file_written_before_the_audio_options_existed_still_loads() {
-        let dir = std::env::temp_dir().join("echomind-settings-legacy");
+        let dir = std::env::temp_dir().join("cadence-settings-legacy");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("config")).unwrap();
         std::fs::write(
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn audio_options_round_trip_through_disk() {
-        let dir = std::env::temp_dir().join("echomind-settings-audio");
+        let dir = std::env::temp_dir().join("cadence-settings-audio");
         let _ = std::fs::remove_dir_all(&dir);
         let s = Settings {
             preprocess_high_pass_hz: 0.0,
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn a_corrupt_settings_file_falls_back_to_defaults() {
-        let dir = std::env::temp_dir().join("echomind-settings-corrupt");
+        let dir = std::env::temp_dir().join("cadence-settings-corrupt");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("config")).unwrap();
         std::fs::write(dir.join("config").join("settings.json"), "{not json").unwrap();

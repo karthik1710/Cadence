@@ -1,7 +1,7 @@
 //! Tauri commands for Settings and the Model Manager (master prompt §27).
 //!
 //! This is where the machine-awareness surfaces to the user: `get_host_info`
-//! reports what EchoMind detected and which profile it chose, and everything
+//! reports what Cadence detected and which profile it chose, and everything
 //! downstream — which LLM, how much context, how many threads — follows from
 //! that unless the user overrides it.
 

@@ -1,5 +1,5 @@
 /**
- * The EchoMind mark.
+ * The Cadence mark.
  *
  * An analog waveform — a continuous swept curve, not the blocky bar-graph
  * every recorder app uses — drawn twice: the solid stroke, plus a faded copy
@@ -18,8 +18,8 @@ export function AppLogo({
   /** Unique per rendered instance — see the note on gradient ids above. */
   id?: string;
 }) {
-  const fill = `echomind-tile-${id}`;
-  const wave = `echomind-wave-${id}`;
+  const fill = `cadence-tile-${id}`;
+  const wave = `cadence-wave-${id}`;
 
   return (
     <svg
@@ -28,7 +28,7 @@ export function AppLogo({
       height={size}
       viewBox="0 0 48 48"
       role="img"
-      aria-label="EchoMind"
+      aria-label="Cadence"
     >
       <defs>
         <linearGradient id={fill} x1="0" y1="0" x2="1" y2="1">

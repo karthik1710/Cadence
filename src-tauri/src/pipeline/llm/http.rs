@@ -9,7 +9,7 @@
 //!
 //! It is written by hand rather than pulled from a crate for the same reason:
 //! adding `reqwest` (or any HTTP client) to the dependency graph would destroy
-//! the cheap structural check that EchoMind has no cloud path in it —
+//! the cheap structural check that Cadence has no cloud path in it —
 //! `cargo tree` showing no HTTP stack at all.
 //!
 //! The alternative — re-running `llama-cli.exe` once per prompt — was

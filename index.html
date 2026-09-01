@@ -2,9 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>EchoMind</title>
+    <script>
+      // Paint the last-known theme before React mounts, so there is no
+      // flash of the wrong theme on cold start. This is only a same-session
+      // / next-launch cache — the backend Settings.theme value (read once
+      // getSettings() resolves) is the source of truth and reconciles this
+      // if they ever differ. No network access, nothing fetched.
+      (function () {
+        try {
+          var cached = window.localStorage.getItem("echomind-theme");
+          if (cached === "light") {
+            document.documentElement.dataset.theme = "light";
+          }
+        } catch (e) {
+          // localStorage can throw (disabled storage, etc.) — fall back to
+          // the default dark look, same as a first-ever run.
+        }
+      })();
+    </script>
   </head>
 
   <body>

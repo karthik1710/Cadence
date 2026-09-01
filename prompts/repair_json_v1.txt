@@ -1,0 +1,17 @@
+The JSON below was produced for a meeting-minutes tool and was rejected by its schema validator.
+
+Validation error:
+{{ERROR}}
+
+Required shape:
+{{SCHEMA}}
+
+Fix the JSON so it satisfies the required shape. Rules:
+
+1. Change as little as possible. Keep every fact, string, speaker label and timestamp exactly as it is — you are fixing structure, not content.
+2. Never invent a value to fill a required field. If information is missing, use null, an empty string, or an empty array as the shape allows.
+3. "confidence" must be exactly one of "high", "medium" or "low". If it is missing or something else, use "low".
+4. Output the corrected JSON object and nothing else. No explanation, no markdown code fences, no commentary.
+
+JSON TO FIX:
+{{INVALID}}

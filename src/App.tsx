@@ -1,331 +1,144 @@
-import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useState } from "react";
+import * as api from "./services/api";
+import { Notice, ThemeToggle } from "./components/ui";
+import { AppLogo } from "./components/AppLogo";
+import { RecordingPanel } from "./features/recording/RecordingPanel";
+import { HistoryView } from "./features/history/HistoryView";
+import { SettingsView } from "./features/settings/SettingsView";
+import { MeetingView } from "./features/meeting/MeetingView";
+import { useTheme } from "./hooks/useTheme";
+import type { SetupStatus } from "./types";
 import "./App.css";
 
-type MeetingState = "idle" | "starting" | "recording" | "stopping";
-type PipelineState = "idle" | "processing" | "completed" | "failed";
+type Tab = "record" | "meetings" | "settings";
 
-interface AudioDeviceInfo {
-  name: string;
-  is_default: boolean;
-}
-
-interface RecordingSummary {
-  file_path: string;
-  sample_rate: number;
-  channels: number;
-}
-
-interface MeetingStatus {
-  status: string;
-  stage: string | null;
-  progress: number;
-  error: string | null;
-}
-
-interface TranscriptSegment {
-  speaker: string;
-  speaker_label: string;
-  start_ms: number;
-  end_ms: number;
-  text: string;
-}
-
-interface Transcript {
-  meeting_id: string;
-  segments: TranscriptSegment[];
-}
-
-const DEFAULT_DEVICE_VALUE = "__default__";
-
-function formatTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
+const TABS: { id: Tab; label: string }[] = [
+  { id: "record", label: "Record" },
+  { id: "meetings", label: "Meetings" },
+  { id: "settings", label: "Settings" },
+];
 
 function App() {
-  const [state, setState] = useState<MeetingState>("idle");
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
-  const [startedAt, setStartedAt] = useState<Date | null>(null);
+  const [tab, setTab] = useState<Tab>("record");
+  const [openMeetingId, setOpenMeetingId] = useState<string | null>(null);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const [setupError, setSetupError] = useState<string | null>(null);
+  const [historyToken, setHistoryToken] = useState(0);
+  const { theme, toggleTheme, persistError, dismissPersistError, syncTheme } = useTheme();
 
-  const [devices, setDevices] = useState<AudioDeviceInfo[]>([]);
-  const [selectedDevice, setSelectedDevice] = useState(DEFAULT_DEVICE_VALUE);
-  const [devicesError, setDevicesError] = useState<string | null>(null);
-
-  const [level, setLevel] = useState(0);
-  const [recordingError, setRecordingError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const [pipeline, setPipeline] = useState<PipelineState>("idle");
-  const [meetingId, setMeetingId] = useState<string | null>(null);
-  const [pipelineStatus, setPipelineStatus] = useState<MeetingStatus | null>(null);
-  const [transcript, setTranscript] = useState<TranscriptSegment[] | null>(null);
-  const [pipelineError, setPipelineError] = useState<string | null>(null);
-
-  const pollRef = useRef<number | null>(null);
-  const statusPollRef = useRef<number | null>(null);
-
-  async function refreshDevices() {
+  // Checked up front, not after a meeting has been captured: a missing model
+  // must never be discovered only once there is real audio to lose.
+  const refreshSetup = useCallback(async () => {
     try {
-      const list = await invoke<AudioDeviceInfo[]>("list_input_devices");
-      setDevices(list);
-      setDevicesError(list.length === 0 ? "No microphone detected." : null);
+      setSetupStatus(await api.checkModels());
+      setSetupError(null);
     } catch (err) {
-      setDevices([]);
-      setDevicesError(String(err));
+      setSetupStatus(null);
+      setSetupError(api.errorMessage(err));
     }
-  }
-
-  useEffect(() => {
-    refreshDevices();
-    // Surfaced before recording, not after: a missing model must never be
-    // discovered only once a real meeting has already been captured.
-    invoke("check_models")
-      .then(() => setModelsError(null))
-      .catch((err) => setModelsError(String(err)));
   }, []);
 
   useEffect(() => {
-    if (state !== "recording") {
-      if (pollRef.current !== null) {
-        window.clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-      return;
-    }
+    refreshSetup();
+  }, [refreshSetup]);
 
-    pollRef.current = window.setInterval(async () => {
-      try {
-        const l = await invoke<number>("get_mic_level");
-        setLevel(l);
-      } catch {
-        // Recording may have just stopped; ignore transient poll errors.
-      }
-      try {
-        const err = await invoke<string | null>("take_recording_error");
-        if (err) setRecordingError(err);
-      } catch {
-        // ignore
-      }
-    }, 150);
-
-    return () => {
-      if (pollRef.current !== null) {
-        window.clearInterval(pollRef.current);
-        pollRef.current = null;
-      }
-    };
-  }, [state]);
-
-  useEffect(() => {
-    if (pipeline !== "processing" || !meetingId) {
-      if (statusPollRef.current !== null) {
-        window.clearInterval(statusPollRef.current);
-        statusPollRef.current = null;
-      }
-      return;
-    }
-
-    statusPollRef.current = window.setInterval(async () => {
-      try {
-        const s = await invoke<MeetingStatus>("get_processing_status", { meetingId });
-        setPipelineStatus(s);
-        if (s.status === "completed") {
-          const t = await invoke<Transcript>("get_transcript", { meetingId });
-          setTranscript(t.segments);
-          setPipeline("completed");
-        } else if (s.status === "failed") {
-          setPipelineError(s.error ?? "Processing failed");
-          setPipeline("failed");
-        }
-      } catch (err) {
-        setPipelineError(String(err));
-        setPipeline("failed");
-      }
-    }, 1000);
-
-    return () => {
-      if (statusPollRef.current !== null) {
-        window.clearInterval(statusPollRef.current);
-        statusPollRef.current = null;
-      }
-    };
-  }, [pipeline, meetingId]);
-
-  async function startMeeting() {
-    setActionError(null);
-    setRecordingError(null);
-    setPipeline("idle");
-    setPipelineStatus(null);
-    setPipelineError(null);
-    setTranscript(null);
-    setMeetingId(null);
-    setState("starting");
-
-    const localMeetingId = crypto.randomUUID();
-    const deviceName = selectedDevice === DEFAULT_DEVICE_VALUE ? null : selectedDevice;
-
-    try {
-      await invoke("start_recording", { deviceName, meetingId: localMeetingId });
-      setMeetingId(localMeetingId);
-      setStartedAt(new Date());
-      setState("recording");
-    } catch (err) {
-      setActionError(String(err));
-      setState("idle");
-    }
-  }
-
-  async function stopMeeting() {
-    setActionError(null);
-    setState("stopping");
-    try {
-      await invoke<RecordingSummary>("stop_recording");
-      setState("idle");
-      setLevel(0);
-      await startProcessing();
-    } catch (err) {
-      setActionError(String(err));
-      setState("idle");
-    }
-  }
-
-  // Runs the whole pipeline on this machine. The recording is already saved
-  // on disk at this point, so a processing failure never costs the meeting.
-  async function startProcessing() {
-    if (!meetingId) return;
-    setPipelineError(null);
-    try {
-      await invoke("start_processing", { meetingId });
-      setPipeline("processing");
-    } catch (err) {
-      setPipelineError(String(err));
-      setPipeline("failed");
-    }
-  }
-
-  const isRecording = state === "recording";
-  const busy = state === "starting" || state === "stopping";
-  const pipelineBusy = pipeline === "processing";
+  const openSettings = () => {
+    setOpenMeetingId(null);
+    setTab("settings");
+  };
 
   return (
     <main className="container">
       <header className="app-header">
-        <h1>EchoMind</h1>
-        <p className="subtitle">Local-first meeting recorder</p>
+        <div className="app-header-row">
+          <div className="app-header-titles">
+            <h1>
+              <AppLogo size={30} />
+              <span>EchoMind</span>
+            </h1>
+            <p className="subtitle">Local meeting intelligence · nothing leaves this computer</p>
+          </div>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        </div>
+        {persistError && (
+          <Notice kind="error">
+            <span className="grow">Theme preference couldn't be saved: {persistError}</span>
+            <button type="button" className="ghost" onClick={dismissPersistError}>
+              Dismiss
+            </button>
+          </Notice>
+        )}
       </header>
 
-      <section className="card">
-        <div className="field-row">
-          <label className="field">
-            <span>Microphone</span>
-            <div className="inline">
-              <select
-                value={selectedDevice}
-                onChange={(e) => setSelectedDevice(e.currentTarget.value)}
-                disabled={isRecording || busy}
-              >
-                <option value={DEFAULT_DEVICE_VALUE}>System default microphone</option>
-                {devices.map((d) => (
-                  <option key={d.name} value={d.name}>
-                    {d.name}
-                    {d.is_default ? " (default)" : ""}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="ghost" onClick={refreshDevices} disabled={isRecording || busy}>
-                Refresh
-              </button>
-            </div>
-          </label>
-        </div>
-        {devicesError && <p className="notice error">{devicesError}</p>}
-        {modelsError && <p className="notice error">{modelsError}</p>}
-      </section>
+      {/* The tab bar is a fixed, non-scrolling shell element — only the
+          content region below it (rendered into .content-scroll) scrolls. */}
+      {!openMeetingId && (
+        <nav className="tabs" role="tablist">
+          {TABS.map((entry) => (
+            <button
+              key={entry.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === entry.id}
+              className={tab === entry.id ? "active" : ""}
+              onClick={() => setTab(entry.id)}
+            >
+              {entry.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
-      <section className="card">
-        <form
-          className="field-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (busy) return;
-            isRecording ? stopMeeting() : startMeeting();
-          }}
-        >
-          <label className="field grow">
-            <span>Meeting title</span>
-            <input
-              placeholder="Untitled meeting"
-              value={title}
-              onChange={(e) => setTitle(e.currentTarget.value)}
-              disabled={isRecording || busy}
-            />
-          </label>
-          <button type="submit" className={isRecording ? "danger" : "primary"} disabled={busy}>
-            {isRecording ? "Stop Meeting" : "Start Meeting"}
-          </button>
-        </form>
-
-        <label className="field">
-          <span>Notes</span>
-          <textarea
-            placeholder="Optional notes"
-            value={notes}
-            onChange={(e) => setNotes(e.currentTarget.value)}
-          />
-        </label>
-
-        {isRecording && (
-          <div className="recording-status">
-            <span className="rec-dot" />
-            {startedAt && <span>Recording since {startedAt.toLocaleTimeString()}</span>}
-            <div className="level-meter">
-              <div className="level-meter-fill" style={{ width: `${Math.round(level * 100)}%` }} />
-            </div>
-          </div>
+      <div className="content-scroll">
+        {setupError && (
+          <Notice kind="error">
+            The local model set could not be checked: {setupError}
+          </Notice>
         )}
 
-        {recordingError && <p className="notice error">Microphone error: {recordingError}</p>}
-        {actionError && <p className="notice error">{actionError}</p>}
-      </section>
+        {/* On the Meetings tab the fix (Record or Settings) lives elsewhere, so
+            this stays a short pointer rather than repeating the full banner. */}
+        {setupStatus && !setupStatus.ready && tab === "meetings" && !openMeetingId && (
+          <Notice kind="warning">
+            <span className="grow">
+              {setupStatus.message ?? "Some models still need to be installed."}
+            </span>
+            <button type="button" className="ghost" onClick={openSettings}>
+              Open Settings
+            </button>
+          </Notice>
+        )}
 
-      {pipeline !== "idle" && (
-        <section className="card">
-          <h2>Processing</h2>
-          {pipelineBusy && (
-            <p className="notice">
-              <span className="spinner" />
-              {`Processing on this machine${pipelineStatus?.stage ? ` — ${pipelineStatus.stage}` : ""}${
-                pipelineStatus?.progress ? ` (${pipelineStatus.progress}%)` : ""
-              }`}
-            </p>
-          )}
-          {pipeline === "failed" && (
-            <>
-              <p className="notice error">{pipelineError}</p>
-              <button type="button" className="ghost" onClick={startProcessing}>
-                Retry processing
-              </button>
-            </>
-          )}
-          {pipeline === "completed" && transcript && (
-            <div className="transcript">
-              {transcript.length === 0 && <p className="notice">No speech detected.</p>}
-              {transcript.map((seg, i) => (
-                <div key={i} className="transcript-segment">
-                  <span className="timestamp">{formatTime(seg.start_ms)}</span>
-                  <span className="speaker">{seg.speaker_label}</span>
-                  <span className="transcript-text">{seg.text}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
+        {openMeetingId ? (
+          <MeetingView
+            meetingId={openMeetingId}
+            onBack={() => setOpenMeetingId(null)}
+            onDeleted={() => {
+              setOpenMeetingId(null);
+              setHistoryToken((n) => n + 1);
+              setTab("meetings");
+            }}
+          />
+        ) : (
+          <>
+            {tab === "record" && (
+              <RecordingPanel
+                onOpenMeeting={setOpenMeetingId}
+                setupReady={setupStatus?.ready ?? false}
+                missingModels={setupStatus?.missing ?? []}
+                onSetupChanged={refreshSetup}
+                onOpenSettings={openSettings}
+              />
+            )}
+            {tab === "meetings" && (
+              <HistoryView onOpenMeeting={setOpenMeetingId} reloadToken={historyToken} />
+            )}
+            {tab === "settings" && (
+              <SettingsView onSetupChanged={refreshSetup} onThemeSaved={syncTheme} />
+            )}
+          </>
+        )}
+      </div>
     </main>
   );
 }

@@ -25,12 +25,16 @@ It's built for real-world mixed-language meetings: **English, Tamil, and code-sw
 ## Features
 
 - 🎙️ **Local recording** — enumerate and pick any Windows input device (default mic, USB conference mic, headset), with live level metering and disconnect/clipping warnings.
-- 📝 **Local speech-to-text** — multilingual, code-switch-aware transcription via whisper.cpp / sherpa-onnx. *(in development)*
-- 🗣️ **Local speaker diarization** — `Person 1`, `Person 2`, … labels without identifying real people. *(in development)*
-- 🧠 **Local LLM meeting minutes** — summary, decisions, action items, open questions, and risks, each grounded in transcript evidence with timestamps — hallucination controls keep speculation from becoming a "decision." *(in development)*
-- 🔍 **Searchable history** — browse past meetings, search within a transcript, jump to any timestamp and replay the audio. *(planned)*
+- 📝 **Local speech-to-text** — multilingual, code-switch-aware transcription via whisper.cpp / sherpa-onnx.
+- 🗣️ **Local speaker diarization** — `Person 1`, `Person 2`, … labels without identifying real people.
+- 🧠 **Local LLM meeting minutes** — summary, decisions, action items, open questions, and risks, each grounded in transcript evidence with timestamps — hallucination controls keep speculation from becoming a "decision."
+- 🔍 **Searchable history** — browse past meetings, search within a transcript, jump to any timestamp and replay the audio.
 - 📤 **Export** — Markdown and JSON today, PDF/DOCX planned.
+- 🧩 **Model management** — install, verify, and remove local STT/LLM/diarization models from Settings, with SHA-256 integrity checks; no manual setup script required.
+- ⚖️ **Adapts to your machine** — detects available RAM and picks smaller/faster models and context sizes on a 16 GB laptop, larger ones on a 32 GB machine, automatically.
 - 🔌 **Offline by design** — once models are installed, disconnect the internet and everything still works.
+
+STT/diarization/LLM model choices are still provisional pending real benchmarks on this project's own (including Tamil/Tanglish) audio — see [docs/model-benchmark.md](docs/model-benchmark.md).
 
 ## How it works
 
@@ -94,7 +98,7 @@ EchoMind/
 
 ## Project status
 
-**Pre-alpha, actively in development.** Local microphone recording works today; the STT → diarization → alignment → MoM pipeline is being built out phase by phase. Nothing here is ready to run an unattended meeting yet.
+**Pre-alpha, actively in development.** The full local pipeline — recording, STT, diarization, alignment, MoM generation, history, export, and model management — is implemented, and now adapts its model choices to the machine's available RAM (16 GB vs. 32 GB). What's still open: this round of work hasn't been compiled or run in the environment that wrote it, and the STT/diarization/LLM model and threshold choices are still provisional, pending real benchmarks (harness now exists — see [docs/model-benchmark.md](docs/model-benchmark.md)) rather than validated defaults. Nothing here is ready to run an unattended meeting yet.
 
 See [meeting-ai-app-PLAN.md](meeting-ai-app-PLAN.md) §38 for the full phase-by-phase roadmap (audio → STT benchmark → diarization benchmark → alignment → LLM benchmark → MoM → UI → packaging), and [docs/models.md](docs/models.md) for model benchmark results as they land.
 
@@ -105,6 +109,9 @@ See [meeting-ai-app-PLAN.md](meeting-ai-app-PLAN.md) §38 for the full phase-by-
 | [meeting-ai-app-PLAN.md](meeting-ai-app-PLAN.md) | Master spec: objective, constraints, schemas, UI, phases |
 | [docs/architecture.md](docs/architecture.md) | Repo layout and key technical decisions |
 | [docs/models.md](docs/models.md) | STT/LLM/diarization candidates and benchmark results |
+| [docs/model-benchmark.md](docs/model-benchmark.md) | `bench_cli` usage and the (currently empty) Phase 2/3/6/14 results template |
+| [docs/performance.md](docs/performance.md) | Per-stage timing/RAM measurements and the §29 budget |
+| [docs/privacy.md](docs/privacy.md) | What's captured, what never leaves the machine, logging, deletion, model integrity |
 | [CLAUDE.md](CLAUDE.md) / [AGENTS.md](AGENTS.md) | Standing instructions for coding agents working in this repo |
 
 ## Contributing

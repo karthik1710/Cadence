@@ -651,33 +651,38 @@ Keep interfaces extensible for future versions.
 
 | Phase | Focus | Status |
 |---|---|---|
-| 0 — Discovery | Inspect repo, Windows environment, Rust/Node/Tauri versions, CPU/RAM/GPU, build tools. Create/update `docs/architecture.md`, `docs/privacy.md`, `docs/model-benchmark.md`, `docs/performance.md`, `AGENTS.md`, `CLAUDE.md` | **Done** (`docs/privacy.md`, `docs/model-benchmark.md` still missing) |
+| 0 — Discovery | Inspect repo, Windows environment, Rust/Node/Tauri versions, CPU/RAM/GPU, build tools. Create/update `docs/architecture.md`, `docs/privacy.md`, `docs/model-benchmark.md`, `docs/performance.md`, `AGENTS.md`, `CLAUDE.md` | **Done** — `docs/privacy.md` and `docs/model-benchmark.md` now exist |
 | 1 — Audio | Microphone enumeration, selection, recording, audio level, metadata, playback | **Done** (playback not built) |
-| 2 — STT Benchmark | Benchmark local STT on English/Tamil/code-switching recordings; select on accuracy, speed, RAM | **Not done** — whisper `small` is in use but was never benchmarked against `base`/`medium`, and no Tamil/Tanglish audio has been tested |
-| 3 — Diarization Benchmark | Benchmark 3/5/10 speakers and room-noise scenarios | **Not done** — cluster threshold set to 0.8 provisionally off one unlabelled sample |
+| 2 — STT Benchmark | Benchmark local STT on English/Tamil/code-switching recordings; select on accuracy, speed, RAM | **Harness built, not yet run** — `bench_cli stt`; whisper `small` is in use but was never benchmarked against `base`/`medium`, and no Tamil/Tanglish audio has been tested. See `docs/model-benchmark.md`. |
+| 3 — Diarization Benchmark | Benchmark 3/5/10 speakers and room-noise scenarios | **Harness built, not yet run** — `bench_cli diarize`; cluster threshold set to 0.8 provisionally off one unlabelled sample. See `docs/model-benchmark.md`. |
 | 4 — Alignment | Merge diarization + STT timestamps into canonical transcript | **Done** — `pipeline/align.rs`, 7 unit tests |
 | 5 — CLI AI Pipeline | Repeatable audio → preprocess → diarize → STT → align → transcript pipeline, before UI integration | **Done** — `cargo run --bin pipeline_cli -- <wav> [out-dir]` |
-| 6 — LLM Benchmark | Benchmark Qwen3-8B Q4, Qwen3-4B Q4, Gemma 3 4B Q4 on identical transcripts | **Next.** Qwen3-8B Q4 weights + `llama-server.exe` are already installed |
-| 7 — MoM | Chunk extraction, synthesis, schema validation, prompt versioning, evidence timestamps | Not started — `Mom`/`ActionItem` types and `validate()` already exist in `pipeline/models.rs` |
+| 6 — LLM Benchmark | Benchmark Qwen3-8B Q4, Qwen3-4B Q4, Gemma 3 4B Q4 on identical transcripts | **Harness built, not yet run — see `docs/model-benchmark.md`.** `bench_cli llm` runs any candidate set against a real transcript; no run has happened, so the memory-tier default LLMs remain provisional (§5). |
+| 7 — MoM | Chunk extraction, synthesis, schema validation, prompt versioning, evidence timestamps | **Done** — chunking/extraction/synthesis/repair/grounding, prompts versioned, see `pipeline/mom.rs` |
 | 8 — Tauri Integration | Integrate local pipeline and process lifecycle | **Done** — `processing.rs` commands, verified end-to-end through the UI |
-| 9 — Transcript UI | Viewer, search, speaker filters, timestamps, playback | Partial — transcript renders with speaker labels; no search/filter/playback |
-| 10 — MoM UI | Summary, topics, decisions, action items, questions, risks, evidence | Not started |
-| 11 — History | SQLite, history, filters, delete, playback, reopen | Not started — `rusqlite` is already a dependency but unused |
-| 12 — Export | Markdown/JSON, then optional PDF/DOCX/TXT | Not started |
-| 13 — Model Manager | Install/remove/select/validate local models | Not started — `scripts/setup-models.ps1` is the dev-time stand-in |
-| 14 — Performance | Full 30–60 minute benchmarks and bottleneck optimization | Not started — see `docs/performance.md` for the small-sample numbers so far |
+| 9 — Transcript UI | Viewer, search, speaker filters, timestamps, playback | **Done** — search/filter/playback/rename added |
+| 10 — MoM UI | Summary, topics, decisions, action items, questions, risks, evidence | **Done** — UI wired to the backend commands |
+| 11 — History | SQLite, history, filters, delete, playback, reopen | **Done** — SQLite index with filesystem fallback/rebuild, `storage.rs` |
+| 12 — Export | Markdown/JSON, then optional PDF/DOCX/TXT | **Done** — Markdown/JSON, `export.rs` |
+| 13 — Model Manager | Install/remove/select/validate local models | **Done** — catalog-driven install/verify/remove with SHA-256, `models_manager.rs`; `scripts/setup-models.ps1` remains a dev-time fallback |
+| 14 — Performance | Full 30–60 minute benchmarks and bottleneck optimization | **Harness built, not yet run** — `bench_cli full` computes the §29 budget check automatically; see `docs/performance.md` for the small-sample numbers so far and `docs/model-benchmark.md` for the run template |
 | 15 — Packaging | Clean Windows 11 install and offline-operation validation | Not started |
+
+**Cross-cutting addition — machine memory tiering.** Alongside the phases above, `src-tauri/src/system.rs` (`MemoryProfile`: Low/Balanced/High by detected RAM) and `src-tauri/src/settings.rs` (`Settings::effective_*`) were added to address a requirement that came in after the fact: the app must run well on 16 GB laptops, not only the 32 GB reference machine. This isn't a numbered phase — it changes how Phases 6, 7, 9–13 all resolve their model/thread defaults, so it's called out here rather than folded silently into one of them. See `docs/architecture.md`.
 
 ### Where things stand (updated 2026-08-31)
 
-The recording → transcript path is complete and runs entirely on the laptop. A meeting recorded in the app produces `original.wav`, `processed.wav`, `diarization.json`, `stt.json`, and a speaker-labelled `transcript.json` under `%APPDATA%\com.echomind.app\meetings\<id>\`, with no network involved — the app no longer links any HTTP client at all (verified via `cargo tree`). The old Raspberry Pi / networked-backend path (`backend.rs`, the UI's backend-URL field) has been deleted.
+The recording → transcript → MoM path is now implemented end to end, entirely on the laptop, including history, export, and a catalog-driven model manager, plus a machine-memory-tiering system so the same build adapts to a 16 GB laptop or the 32 GB reference machine. A meeting recorded in the app produces `original.wav`, `processed.wav`, `diarization.json`, `stt.json`, `transcript.json`, `mom.json`, and `metrics.json` under `%APPDATA%\com.echomind.app\meetings\<id>\`, with no network involved in any of that — the app links no HTTP client for AI processing at all (verified via `cargo tree`; the loopback client that drives `llama-server.exe` and the `curl.exe`/`tar.exe` shellouts in the Model Manager are the only network-adjacent code, both scoped and explained in `docs/privacy.md`). The old Raspberry Pi / networked-backend path (`backend.rs`, the UI's backend-URL field) has been deleted.
+
+**Be honest about what "done" means here: nothing in this round of work has been compiled or run.** This pass (Phases 6/7/9–13 plus memory tiering) was built in an environment with no Rust or Node toolchain available, so `cargo build`, `cargo test`, and `npm run build` have not been executed against any of it. Every claim of "Done" in the phase table above describes code that exists and, where unit tests are written inline, is unit-tested *in source* — it does not mean the crate has been proven to compile, that `cargo test` has been proven to pass, or that the app has been run. Compiling and running this is the immediate next step before any of it can be trusted, let alone shipped.
 
 **Open risks carried forward:**
 
-- Neither STT nor diarization has been benchmarked per §6/§7. The whisper model size and the 0.8 cluster threshold are both unvalidated defaults — see `docs/models.md`.
-- No Tamil or code-switched audio has been run through the pipeline yet, which is a hard V1 requirement (§8).
-- Processing extrapolates to roughly 15 min for a 60-min meeting, over the §29 target of 10, and that is before the LLM stage exists.
-- `setup-models.ps1` downloads binaries with no checksum verification, and the app executes them from `%APPDATA%` — worth hardening before packaging (§35), especially on a machine running enterprise EDR.
+- Neither STT nor diarization has been benchmarked per §6/§7, and now neither has the LLM stage per §6/Phase 6 — the harness to do all three (`bench_cli`) exists (`docs/model-benchmark.md`) but has not been run. The whisper model size, the 0.8 cluster threshold, and the memory-tier default LLMs (Qwen3-4B on 16 GB, Qwen3-8B on 32 GB) are all unvalidated defaults — see `docs/models.md`.
+- No Tamil or code-switched audio has been run through the pipeline yet, which is a hard V1 requirement (§8) — this now also blocks judging MoM quality on Tanglish content, not only STT.
+- Processing extrapolated to roughly 15 min for a 60-min meeting on the one small sample available, over the §29 target of 10, and that was before the LLM stage existed; `bench_cli full` can now measure the real number once it's run, but hasn't been.
+- `setup-models.ps1` downloads binaries with no checksum verification; the new `models_manager.rs` install path does record a SHA-256 at install time (`verify()` catches later corruption/tampering), but first-download trust is still not cryptographically guaranteed — see `docs/privacy.md`. Worth hardening further before packaging (§35), especially on a machine running enterprise EDR.
+- This round of work has not been compiled — see above. A build pass (and fixing whatever it surfaces) has to happen before any of Phases 6/7/9–13 can be considered actually verified, regardless of what the phase table says.
 
 ---
 

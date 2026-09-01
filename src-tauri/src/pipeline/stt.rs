@@ -1,5 +1,6 @@
 use crate::pipeline::models::SttSegment;
 use crate::pipeline::paths::ModelPaths;
+use crate::pipeline::proc::{self, StageMetrics};
 use crate::pipeline::PipelineConfig;
 use serde::Deserialize;
 use std::path::Path;
@@ -35,11 +36,12 @@ pub fn transcribe(
     paths: &ModelPaths,
     config: &PipelineConfig,
     wav_path: &Path,
-) -> Result<Vec<SttSegment>, String> {
+) -> Result<(Vec<SttSegment>, StageMetrics), String> {
     // whisper.cpp appends `.json` itself, so pass the base path without it.
     let output_base = wav_path.with_extension("");
 
-    let status = Command::new(paths.whisper_cli())
+    let mut command = Command::new(paths.whisper_cli());
+    command
         .arg("-m")
         .arg(&paths.stt_model)
         .arg("-f")
@@ -55,19 +57,27 @@ pub fn transcribe(
         .arg(config.stt_threads.to_string())
         .arg("--output-json")
         .arg("--output-file")
-        .arg(&output_base)
-        .status()
-        .map_err(|e| format!("failed to launch whisper-cli.exe: {e}"))?;
+        .arg(&output_base);
 
-    if !status.success() {
-        return Err(format!("whisper-cli.exe exited with status {status}"));
+    let measured = proc::run_measured(command)?;
+    if !measured.success {
+        return Err(format!(
+            "whisper-cli.exe exited with {}: {}",
+            measured.status,
+            last_lines(&measured.stderr, 4)
+        ));
     }
 
     let json_path = wav_path.with_extension("json");
     let raw = std::fs::read_to_string(&json_path)
         .map_err(|e| format!("could not read whisper output {json_path:?}: {e}"))?;
+    let segments = parse_whisper_json(&raw)?;
+    Ok((segments, measured.metrics))
+}
+
+fn parse_whisper_json(raw: &str) -> Result<Vec<SttSegment>, String> {
     let parsed: WhisperJsonOutput =
-        serde_json::from_str(&raw).map_err(|e| format!("could not parse whisper JSON: {e}"))?;
+        serde_json::from_str(raw).map_err(|e| format!("could not parse whisper JSON: {e}"))?;
 
     Ok(parsed
         .transcription
@@ -85,4 +95,43 @@ pub fn transcribe(
             })
         })
         .collect())
+}
+
+fn last_lines(text: &str, count: usize) -> String {
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    lines[lines.len().saturating_sub(count)..].join(" | ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_whisper_output() {
+        let raw = r#"{
+            "transcription": [
+                {"offsets": {"from": 0, "to": 2400}, "text": " We should move this to the next sprint."},
+                {"offsets": {"from": 2400, "to": 2600}, "text": "   "},
+                {"offsets": {"from": 2600, "to": 5000}, "text": "இந்த feature ready ஆச்சா?"}
+            ]
+        }"#;
+        let segments = parse_whisper_json(raw).unwrap();
+        // The blank segment is dropped; the others keep their offsets and text.
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].start_ms, 0);
+        assert_eq!(segments[0].text, "We should move this to the next sprint.");
+        assert_eq!(segments[1].text, "இந்த feature ready ஆச்சா?");
+    }
+
+    #[test]
+    fn reports_unparseable_output() {
+        assert!(parse_whisper_json("not json").is_err());
+    }
+
+    #[test]
+    fn summarises_the_tail_of_an_error() {
+        let text = "line one\n\nline two\nline three\nline four\nline five";
+        assert_eq!(last_lines(&text, 2), "line four | line five");
+        assert_eq!(last_lines("", 3), "");
+    }
 }

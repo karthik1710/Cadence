@@ -1,5 +1,6 @@
 use crate::pipeline::models::DiarizationSegment;
 use crate::pipeline::paths::ModelPaths;
+use crate::pipeline::proc::{self, StageMetrics};
 use crate::pipeline::PipelineConfig;
 use std::path::Path;
 use std::process::Command;
@@ -14,8 +15,9 @@ pub fn diarize(
     paths: &ModelPaths,
     config: &PipelineConfig,
     wav_path: &Path,
-) -> Result<Vec<DiarizationSegment>, String> {
-    let output = Command::new(paths.sherpa_diarization())
+) -> Result<(Vec<DiarizationSegment>, StageMetrics), String> {
+    let mut command = Command::new(paths.sherpa_diarization());
+    command
         .arg(format!(
             "--segmentation.pyannote-model={}",
             paths.diarization_segmentation_model.display()
@@ -36,22 +38,23 @@ pub fn diarize(
             "--clustering.cluster-threshold={}",
             config.cluster_threshold
         ))
-        .arg(wav_path)
-        .output()
-        .map_err(|e| {
-            format!("failed to launch sherpa-onnx-offline-speaker-diarization.exe: {e}")
-        })?;
+        .arg(wav_path);
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let measured = proc::run_measured(command)?;
+    if !measured.success {
         return Err(format!(
             "sherpa-onnx diarization exited with {}: {}",
-            output.status, stderr
+            measured.status,
+            measured.stderr.trim()
         ));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout.lines().filter_map(parse_diarization_line).collect())
+    let segments = measured
+        .stdout
+        .lines()
+        .filter_map(parse_diarization_line)
+        .collect();
+    Ok((segments, measured.metrics))
 }
 
 fn parse_diarization_line(line: &str) -> Option<DiarizationSegment> {

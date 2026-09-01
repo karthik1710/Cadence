@@ -1,253 +1,1419 @@
-:root {
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --border: #e2e5ea;
-  --text: #16181d;
-  --text-muted: #6b7280;
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --danger: #dc2626;
-  --danger-hover: #b91c1c;
-  --success: #16a34a;
+/* EchoMind — solid, opaque desktop theme.
 
-  font-family: "Segoe UI", Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 15px;
-  line-height: 1.5;
+   No translucency anywhere: no window transparency, no acrylic/mica, no
+   `backdrop-filter`. Surfaces are flat colours that sit on each other in a
+   plain three-step stack, which is what makes text over them predictable to
+   read — the whole point after the glass experiment made it anything but.
+
+     1. `--app-bg` is the page ground.
+     2. `--panel` sits above it (cards), `--panel-quiet` slightly below it for
+        secondary blocks.
+     3. `--well` sits *below* the ground (inputs, tracks), so a field reads as
+        cut into the page rather than floating on it.
+
+   Depth comes from a hairline border plus one soft ambient shadow — never a
+   shadow pair, never a blur. Shadows are sized to fade out well inside
+   `.content-scroll`'s padding; one that reaches that scroll container's edge
+   gets sliced off in a hard line.
+
+   Two themes, same variable names, retuned rather than alpha-flipped: a light
+   panel needs a dark hairline to separate (a white border on white is
+   invisible), and a heavy black shadow under a white card reads as dirt.
+
+   No web fonts and no CDN links: the app has to look identical with the
+   network unplugged. Every value here is a flat colour, a gradient, or a
+   system font. */
+
+:root {
+  /* ---- the glass substrate (dark theme) ------------------------------- */
+  /* Opaque fallback, used whenever vibrancy is off. */
+  --app-bg: #12151c;
+  /* ...and the sheer tint used when the OS backdrop is confirmed on. The
+     acrylic layer already carries ~55% of a near-black ink, so this only has
+     to top it up, not do the work. */
+
+  /* Panel fills, lightest (most prominent) to heaviest (most recessed). */
+  --panel: #1c2130;
+  --panel-hover: #232a3b;
+  --panel-quiet: #181d29;
+  /* "Wells" are inputs and tracks: darker than their surroundings, so they
+     read as cut *into* the glass rather than laid on top of it. */
+  --well: #0e1119;
+  --well-hover: #131824;
+
+
+  /* Edges: the hairline border, plus the brighter inner line along the top
+     that reads as light catching the lip of the glass. */
+  --edge: rgba(255, 255, 255, 0.1);
+  --edge-strong: rgba(255, 255, 255, 0.18);
+  --edge-top: rgba(255, 255, 255, 0.22);
+  /* Wells invert it: the light line goes on the bottom, a dark one on top. */
+  --edge-well: rgba(0, 0, 0, 0.45);
+
+  /* Ambient shadows. Every one of these is sized to fade out well inside
+     `.content-scroll`'s padding — see the note on that rule; a shadow that
+     reaches the scroll container's edge gets sliced off in a hard line. */
+  --sh-ambient-sm: 0 3px 12px -6px rgba(0, 0, 0, 0.55);
+  --sh-ambient: 0 10px 28px -12px rgba(0, 0, 0, 0.62);
+  --sh-lift: 0 16px 38px -14px rgba(0, 0, 0, 0.68);
+
+  --divider: rgba(255, 255, 255, 0.09);
+
+  /* Chrome that can't read a surface token (native scrollbar, spinner ring). */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.18);
+  --spinner-track: rgba(255, 255, 255, 0.14);
+
+  /* ---- text: flat and strong, never translucent ----------------------- */
+  --text: #eef1f8;
+  --text-muted: #b0bad0;
+  --text-dim: #949eb6;
+
+  /* ---- accent (indigo → teal) ----------------------------------------- */
+  --accent: #8b9bff;
+  --accent-2: #5fe0d0;
+  --accent-hover: #a6b2ff;
+  --accent-strong: linear-gradient(135deg, #7c8fff 0%, #58d8c9 130%);
+  --accent-soft: rgba(124, 143, 255, 0.2);
+  --accent-line: rgba(124, 143, 255, 0.45);
+  --accent-glow: rgba(124, 143, 255, 0.45);
+  --accent-ink: #0b0e1c;
+
+  /* ---- danger (warm coral) -------------------------------------------- */
+  --danger: #ff8b84;
+  --danger-2: #ffb08c;
+  --danger-hover: #ffa39c;
+  --danger-strong: linear-gradient(135deg, #ff746c 0%, #ff9a76 130%);
+  --danger-soft: rgba(255, 128, 121, 0.2);
+  --danger-glow: rgba(255, 116, 108, 0.45);
+  --danger-ink: #2a0806;
+
+  /* ---- warning (amber) ------------------------------------------------- */
+  --warning: #ffbc63;
+  --warning-2: #ffd68a;
+  --warning-soft: rgba(255, 180, 84, 0.2);
+  --warning-glow: rgba(255, 180, 84, 0.4);
+  --warning-ink: #2a1a02;
+
+  /* ---- success (mint) --------------------------------------------------- */
+  --success: #57e7ad;
+  --success-2: #8bf2cd;
+  --success-soft: rgba(75, 227, 166, 0.2);
+  --success-glow: rgba(75, 227, 166, 0.4);
+  --success-ink: #052117;
+
+  /* Notice body text is its own colour: the status hue itself is too
+     saturated to read a paragraph in, so these are pale tints of it. */
+  --notice-error-ink: #ffdedb;
+  --notice-warning-ink: #ffe8c9;
+  --notice-success-ink: #d2fbeb;
+
+  --mark-bg: rgba(255, 197, 92, 0.85);
+  --mark-ink: #241804;
+
+  /* ---- spacing scale (8px base) ---------------------------------------- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.25rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+
+  /* ---- radii ------------------------------------------------------------ */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-pill: 999px;
+
+  /* ---- motion ----------------------------------------------------------- */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 150ms;
+  --t-med: 220ms;
+
+  /* Inherited by every native control, so scrollbars, date pickers and number
+     spinners match the theme without per-element rules. */
+  --color-scheme: dark;
+
+  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
   color: var(--text);
-  background-color: var(--bg);
+  color-scheme: var(--color-scheme);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
 
+/* -- light theme: the same variable names, retuned for bright glass.
+
+   Not derived from the dark values by flipping alphas — light glass fails in
+   the opposite direction. Dark panels need a *bright* border to separate from
+   their surroundings; light panels need a *dark* hairline, because a white
+   border on a white panel is invisible and the whole card dissolves. Likewise
+   the shadows are cooler and much weaker: a heavy black shadow under a white
+   card reads as dirt, not depth.
+
+   Same specificity as `:root` (both match <html>), so source order — this
+   block coming second — is what makes it win when `data-theme="light"` is
+   set. Dark is left untouched. -- */
+[data-theme="light"] {
+  --app-bg: #eef1f7;
+
+  --panel: #ffffff;
+  --panel-hover: #f8fafd;
+  --panel-quiet: #f5f7fb;
+  /* A light well can't be "darker glass" without turning muddy; it is instead
+     a *cleaner*, more opaque white with a dark inner top edge. */
+  --well: #e9edf5;
+  --well-hover: #e2e8f2;
+
+  --edge: rgba(17, 26, 48, 0.12);
+  --edge-strong: rgba(17, 26, 48, 0.2);
+  --edge-top: rgba(255, 255, 255, 0.85);
+  --edge-well: rgba(17, 26, 48, 0.14);
+
+  --sh-ambient-sm: 0 3px 12px -6px rgba(23, 34, 60, 0.22);
+  --sh-ambient: 0 10px 28px -12px rgba(23, 34, 60, 0.3);
+  --sh-lift: 0 16px 38px -14px rgba(23, 34, 60, 0.34);
+
+  --divider: rgba(17, 26, 48, 0.11);
+
+  --scrollbar-thumb: rgba(17, 26, 48, 0.22);
+  --spinner-track: rgba(17, 26, 48, 0.16);
+
+  --text: #151b2a;
+  --text-muted: #47516a;
+  --text-dim: #5f6a83;
+
+  /* Darkened for contrast on a bright ground; the ink used *on* the accent
+     fill flips to near-white so `button.primary` stays readable. */
+  --accent: #4453d6;
+  --accent-2: #0c8375;
+  --accent-hover: #3341c4;
+  --accent-strong: linear-gradient(135deg, #4453d6 0%, #0e8f80 130%);
+  --accent-soft: rgba(68, 83, 214, 0.14);
+  --accent-line: rgba(68, 83, 214, 0.4);
+  --accent-glow: rgba(68, 83, 214, 0.35);
+  --accent-ink: #f7f9ff;
+
+  --danger: #c22e26;
+  --danger-2: #d9603f;
+  --danger-hover: #a8241d;
+  --danger-strong: linear-gradient(135deg, #c8332b 0%, #d9603f 130%);
+  --danger-soft: rgba(200, 51, 43, 0.14);
+  --danger-glow: rgba(200, 51, 43, 0.3);
+  --danger-ink: #fff3f1;
+
+  --warning: #9a6106;
+  --warning-2: #c98518;
+  --warning-soft: rgba(165, 104, 10, 0.16);
+  --warning-glow: rgba(165, 104, 10, 0.3);
+  --warning-ink: #fff8ec;
+
+  --success: #128054;
+  --success-2: #2fae76;
+  --success-soft: rgba(26, 143, 94, 0.16);
+  --success-glow: rgba(26, 143, 94, 0.3);
+  --success-ink: #f2fff8;
+
+  --notice-error-ink: #7a231d;
+  --notice-warning-ink: #6b4406;
+  --notice-success-ink: #0f5c3c;
+
+  --mark-bg: rgba(255, 206, 102, 0.9);
+  --mark-ink: #3a2708;
+
+  --color-scheme: light;
+
+  color: var(--text);
+  color-scheme: var(--color-scheme);
+}
+
 * {
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
+/* --- desktop app shell: fixed viewport, no page-level scroll ------------- */
+/* This is a Tauri desktop window, not a webpage: the outermost level must
+   never scroll (no bounce, no dead space past the real content). Only the
+   inner content region — `.content-scroll` below — scrolls, and it scrolls
+   flush to its own content's actual end. */
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
 }
 
+/* Opaque by default. This is the fallback half of the vibrancy contract: if
+   the native backdrop never applied, a translucent body over a transparent
+   window would be literally see-through. Flat colour, never a gradient — a
+   decorative wash over the user's own blurred wallpaper is exactly the noise
+   this design is trying to get out of the way. */
+body {
+  margin: 0;
+  color: var(--text);
+  background-color: var(--app-bg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* -- scrollbars (Chromium/WebView2) -- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: var(--r-pill);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--accent-glow);
+}
+
+/* --- shell ---------------------------------------------------------------- */
+
 .container {
-  max-width: 720px;
+  height: 100%;
+  max-width: 1000px;
   margin: 0 auto;
-  padding: 2.5rem 1.5rem 4rem;
+  padding: var(--sp-5) var(--sp-5) 0;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: var(--sp-4);
+  overflow: hidden;
+  animation: shell-in 420ms var(--ease) both;
+}
+
+@keyframes shell-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .app-header {
+  flex: 0 0 auto;
+  padding: 0.15rem 0 0.35rem;
+}
+
+.app-header-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.app-header-titles {
+  flex: 1;
+  min-width: 0;
   text-align: center;
-  margin-bottom: 0.5rem;
+}
+
+/* Pinned to the right of the fixed, non-scrolling header — reachable at any
+   window size without scrolling (min window is 800x600). */
+.theme-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  color: var(--text-muted);
+  box-shadow: var(--sh-ambient-sm), inset 0 1px 0 var(--edge-top);
+}
+
+.theme-toggle:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-hover);
+  border-color: var(--edge-strong);
+  box-shadow: var(--sh-ambient), inset 0 1px 0 var(--edge-top);
+}
+
+.theme-toggle:active:not(:disabled) {
+  transform: scale(0.94);
+  box-shadow: inset 0 1px 3px var(--edge-well);
+}
+
+.theme-toggle svg {
+  width: 1.2rem;
+  height: 1.2rem;
 }
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.75rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  background: linear-gradient(120deg, var(--text) 35%, var(--accent-2) 145%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* The real mark (components/AppLogo.tsx) replaced the plain gradient square
+   that used to sit here. It carries its own colours, so it is deliberately
+   left out of the h1's gradient-text clipping above. */
+.app-logo {
+  flex: 0 0 auto;
+  display: block;
+  border-radius: 9px;
+  box-shadow: 0 4px 14px -5px var(--accent-glow);
 }
 
 .subtitle {
-  margin: 0.25rem 0 0;
+  margin: 0.35rem 0 0;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
+  letter-spacing: 0.01em;
 }
 
+/* The header and tab bar are fixed, non-scrolling shell chrome. Only this
+   region scrolls, and it owns its own trailing space so there is never empty
+   scroll travel past real content.
+
+   The padding is load-bearing, not decoration: `overflow-y: auto` clips every
+   descendant's box-shadow at THIS element's own edge regardless of scroll
+   position, so an ambient shadow that reaches the boundary gets cut in a hard
+   visible line. Worst case here is `--sh-lift` (0 16px 38px -14px), which
+   extends ~22px below and ~5px to the sides of its box; 24px of side padding
+   and 32px at the bottom contain it with room to spare. Keep that true of any
+   shadow added later. */
+.content-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-6) var(--sp-8);
+}
+
+.tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.tabs button {
+  flex: 1;
+  min-width: 6rem;
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  color: var(--text-muted);
+  padding: 0.6em 1em;
+  border-radius: var(--r-md);
+  box-shadow: var(--sh-ambient-sm), inset 0 1px 0 var(--edge-top);
+  transition: color var(--t-fast) var(--ease), background-color var(--t-med) var(--ease),
+    border-color var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease);
+}
+
+.tabs button:hover:not(:disabled):not(.active) {
+  color: var(--text);
+  background: var(--panel-hover);
+  border-color: var(--edge-strong);
+}
+
+/* Selected reads through *light*, not through an inverted shadow: a brighter
+   pane, an accent-lit border, and an accent glow lying under it. */
+.tabs button.active {
+  color: var(--accent-2);
+  font-weight: 700;
+  background: var(--panel);
+  border-color: var(--accent-line);
+  box-shadow: var(--sh-ambient-sm), inset 0 1px 0 var(--edge-top),
+    0 0 0 1px var(--accent-soft), 0 6px 18px -10px var(--accent-glow);
+}
+
+.tabs button:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+/* --- surfaces ------------------------------------------------------------- */
+
+/* The core glass pane: a translucent fill that frosts whatever app content is
+   behind it, a hairline border, one bright inner line along the top edge, and
+   a single soft ambient shadow underneath. */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 1.25rem 1.5rem;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  border-radius: var(--r-lg);
+  padding: 1.35rem 1.5rem 1.6rem;
+  box-shadow: var(--sh-ambient), inset 0 1px 0 var(--edge-top);
 }
 
-.card h2 {
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-  font-weight: 600;
+.card + .card,
+.recording-panel > * + *,
+.settings-view > * + *,
+.meeting-view > * + * {
+  margin-top: var(--sp-4);
 }
+
+.recording-panel,
+.settings-view,
+.meeting-view {
+  display: block;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.card h1 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.card h2,
+.card-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.card h3 {
+  margin: 1.2rem 0 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.card h3:first-child {
+  margin-top: 0;
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.footer-note {
+  text-align: center;
+  margin-top: 0.4rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  opacity: 0.7;
+}
+
+code,
+.data-dir {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 0.82em;
+  background: var(--well);
+  border: 1px solid var(--edge);
+  border-top-color: var(--edge-well);
+  border-radius: 6px;
+  padding: 0.1em 0.45em;
+  word-break: break-all;
+  color: var(--accent-2);
+}
+
+.data-dir {
+  display: block;
+  padding: 0.7em 0.9em;
+  color: var(--text);
+}
+
+/* --- recommended setup banner (§27) ---------------------------------------- */
+
+.recommended-setup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-6);
+  flex-wrap: wrap;
+}
+
+.recommended-setup-copy h2 {
+  background: var(--accent-strong);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.recommended-setup-copy p {
+  margin: var(--sp-2) 0 0;
+  max-width: 46rem;
+}
+
+.recommended-setup-action {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-shrink: 0;
+}
+
+.recommended-setup-progress {
+  margin-top: var(--sp-4);
+}
+
+.recommended-setup-progress .progress-track {
+  max-width: none;
+}
+
+/* --- form controls -------------------------------------------------------- */
 
 .field-row {
   display: flex;
-  gap: 1rem;
+  gap: 0.9rem;
   align-items: flex-end;
   flex-wrap: wrap;
+}
+
+.field-row + .field,
+.field + .field,
+.field-row + .field-row {
+  margin-top: 0.9rem;
 }
 
 .field {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--text-muted);
   flex: 1;
-  min-width: 200px;
+  min-width: 11rem;
 }
 
 .field.grow {
   flex: 2;
 }
 
-.inline {
-  display: flex;
-  gap: 0.5rem;
+.field.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  margin-top: 0.7rem;
 }
 
+.field.checkbox span {
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: normal;
+}
+
+.inline {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.grow {
+  flex: 1;
+}
+
+/* Inputs are wells: darker (dark theme) or cleaner (light theme) than the
+   panel around them, with the highlight line moved to the *bottom* edge and a
+   soft shading along the top — the opposite of a raised pane. */
 select,
 input,
 textarea {
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  padding: 0.55em 0.8em;
-  font-size: 0.92rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--edge);
+  border-top-color: var(--edge-well);
+  padding: 0.55em 0.75em;
+  font-size: 0.88rem;
   font-family: inherit;
   font-weight: 400;
   color: var(--text);
-  background-color: var(--surface);
-  transition: border-color 0.15s;
+  background-color: var(--well);
+  box-shadow: inset 0 1px 3px var(--edge-well), inset 0 -1px 0 var(--edge-top);
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
   width: 100%;
+}
+
+select:hover:not(:disabled),
+input:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  background-color: var(--well-hover);
+  border-color: var(--edge-strong);
 }
 
 select:focus,
 input:focus,
 textarea:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--accent-line);
+  box-shadow: inset 0 1px 3px var(--edge-well), 0 0 0 3px var(--accent-soft);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 textarea {
-  min-height: 4.5em;
+  min-height: 3.8em;
   resize: vertical;
 }
 
+/* `color-scheme` is inherited, so these already match the theme via :root —
+   restated explicitly because these two controls render native pickers whose
+   chrome is easy to leave stranded on the wrong palette. */
+input[type="date"],
+input[type="number"] {
+  color-scheme: var(--color-scheme);
+}
+
+/* Glass checkbox: a small well; checked fills it with the accent so the state
+   reads instantly rather than relying on a subtle surface change. */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.2em;
+  height: 1.2em;
+  min-width: 1.2em;
+  border-radius: 6px;
+  background: var(--well);
+  border: 1px solid var(--edge-strong);
+  box-shadow: inset 0 1px 3px var(--edge-well);
+  display: inline-grid;
+  place-content: center;
+  cursor: pointer;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+}
+
+input[type="checkbox"]::after {
+  content: "";
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 3px;
+  background: var(--accent-strong);
+  transform: scale(0);
+  transition: transform var(--t-fast) var(--ease);
+}
+
+input[type="checkbox"]:checked {
+  border-color: var(--accent-line);
+}
+
+input[type="checkbox"]:checked::after {
+  transform: scale(1);
+}
+
+input[type="checkbox"]:hover:not(:disabled) {
+  background: var(--well-hover);
+  border-color: var(--accent-line);
+}
+
 button {
-  border-radius: 9px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.4em;
-  font-size: 0.92rem;
-  font-weight: 600;
+  border-radius: var(--r-md);
+  border: 1px solid var(--edge);
+  padding: 0.6em 1.2em;
+  font-size: 0.88rem;
+  font-weight: 700;
   font-family: inherit;
   cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--sh-ambient-sm), inset 0 1px 0 var(--edge-top);
+  transition: background-color var(--t-med) var(--ease), border-color var(--t-med) var(--ease),
+    box-shadow var(--t-med) var(--ease), color var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
   white-space: nowrap;
 }
 
+/* Keyboard focus must stay unmistakable even though every surface here is
+   deliberately low-contrast — a solid accent outline, not a tint. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.history-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:hover:not(:disabled) {
+  background: var(--panel-hover);
+  border-color: var(--edge-strong);
+  box-shadow: var(--sh-ambient), inset 0 1px 0 var(--edge-top);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.99);
+  box-shadow: inset 0 1px 4px var(--edge-well);
+}
+
 button.primary {
-  background-color: var(--accent);
-  color: white;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--accent-strong);
+  border-color: transparent;
+  color: var(--accent-ink);
+  box-shadow: var(--sh-ambient-sm), 0 8px 24px -10px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+button.primary::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.4) 50%, transparent 70%);
+  transform: translateX(-130%);
+  transition: transform 650ms var(--ease);
 }
 
 button.primary:hover:not(:disabled) {
-  background-color: var(--accent-hover);
+  background: var(--accent-strong);
+  border-color: transparent;
+  box-shadow: var(--sh-ambient), 0 12px 32px -10px var(--accent-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+button.primary:hover:not(:disabled)::after {
+  transform: translateX(130%);
+}
+
+button.primary:active:not(:disabled) {
+  transform: scale(0.99);
+  box-shadow: inset 0 2px 6px rgba(6, 8, 22, 0.45);
 }
 
 button.danger {
-  background-color: var(--danger);
-  color: white;
+  background: var(--danger-strong);
+  border-color: transparent;
+  color: var(--danger-ink);
+  box-shadow: var(--sh-ambient-sm), 0 8px 24px -10px var(--danger-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
 }
 
 button.danger:hover:not(:disabled) {
-  background-color: var(--danger-hover);
+  background: var(--danger-strong);
+  border-color: transparent;
+  box-shadow: var(--sh-ambient), 0 12px 32px -10px var(--danger-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42);
+}
+
+button.danger:active:not(:disabled) {
+  transform: scale(0.99);
+  box-shadow: inset 0 2px 6px rgba(30, 4, 4, 0.45);
 }
 
 button.ghost {
-  background-color: transparent;
-  border-color: var(--border);
+  background: var(--panel-quiet);
   color: var(--text-muted);
 }
 
 button.ghost:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
+  color: var(--text);
+  background: var(--panel-hover);
+  border-color: var(--accent-line);
+}
+
+button.ghost.danger,
+button.danger.ghost {
+  background: var(--panel-quiet);
+  color: var(--danger);
+  border-color: var(--edge);
+  box-shadow: var(--sh-ambient-sm), inset 0 1px 0 var(--edge-top);
+}
+
+button.ghost.danger:hover:not(:disabled),
+button.danger.ghost:hover:not(:disabled) {
+  color: var(--danger-hover);
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  box-shadow: var(--sh-ambient), inset 0 1px 0 var(--edge-top);
 }
 
 button:disabled {
-  opacity: 0.55;
+  opacity: 0.4;
   cursor: not-allowed;
+  box-shadow: var(--sh-ambient-sm) !important;
+  transform: none !important;
 }
 
-.recording-status {
+button.link {
+  background: none;
+  box-shadow: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: inherit;
+  text-decoration: none;
+}
+
+button.link:hover:not(:disabled) {
+  color: var(--accent-hover);
+  background: none;
+  text-decoration: underline;
+  box-shadow: none;
+}
+
+button.link:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+button.link:disabled {
+  box-shadow: none !important;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+/* --- notices and status --------------------------------------------------- */
+
+.notice {
+  margin: 0.8rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: var(--r-md);
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--text-dim);
+  box-shadow: inset 0 1px 0 var(--edge-top);
+  font-size: 0.83rem;
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  margin-top: 0.9rem;
-  font-size: 0.85rem;
-  color: var(--text-muted);
+  flex-wrap: wrap;
 }
 
-.rec-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--danger);
-  animation: pulse 1.4s ease-in-out infinite;
+.notice::before {
   flex-shrink: 0;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
-}
-
-.level-meter {
-  flex: 1;
-  min-width: 80px;
-  height: 8px;
-  border-radius: 6px;
-  background-color: var(--border);
-  overflow: hidden;
-}
-
-.level-meter-fill {
-  height: 100%;
-  background-color: var(--success);
-  transition: width 80ms linear;
-}
-
-.notice {
-  margin: 0.75rem 0 0;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  width: 1.3em;
+  height: 1.3em;
+  border-radius: 50%;
+  font-size: 0.75rem;
+  font-weight: 800;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-top);
+}
+
+.notice.info::before {
+  content: "i";
+  color: var(--text-muted);
 }
 
 .notice.error {
+  color: var(--notice-error-ink);
+  border-color: var(--edge);
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.notice.error::before {
+  content: "!";
   color: var(--danger);
 }
 
+.notice.warning {
+  color: var(--notice-warning-ink);
+  border-color: var(--edge);
+  border-left-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.notice.warning::before {
+  content: "!";
+  color: var(--warning);
+}
+
+.notice.success {
+  color: var(--notice-success-ink);
+  border-color: var(--edge);
+  border-left-color: var(--success);
+  background: var(--success-soft);
+}
+
+.notice.success::before {
+  content: "✓";
+  color: var(--success);
+}
+
 .spinner {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  border: 2px solid var(--border);
+  border: 2px solid var(--spinner-track);
   border-top-color: var(--accent);
   animation: spin 0.7s linear infinite;
   flex-shrink: 0;
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.22em 0.7em;
+  border-radius: var(--r-pill);
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-top);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: "";
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.badge.success {
+  color: var(--success);
+  background: var(--success-soft);
+  border-color: var(--success-soft);
+}
+
+.badge.error {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger-soft);
+}
+
+.badge.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.badge.active::before {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.badge.muted {
+  color: var(--text-dim);
+}
+
+.badge.muted::before {
+  opacity: 0.4;
+}
+
+.marker {
+  display: inline-block;
+  padding: 0.1em 0.5em;
+  margin-left: 0.35rem;
+  border-radius: 6px;
+  background: var(--well);
+  border: 1px solid var(--edge);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.marker.warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-color: var(--warning-soft);
+}
+
+/* --- recording ------------------------------------------------------------ */
+
+.recording-status {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-top: 1.1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  flex-wrap: wrap;
+}
+
+.timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.rec-dot {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px var(--danger-glow);
+}
+
+.rec-dot::before {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid var(--danger);
+  opacity: 0;
+  animation: rec-ring 1.6s ease-out infinite;
+}
+
+@keyframes rec-ring {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.level-meter {
+  flex: 1;
+  min-width: 5rem;
+  height: 9px;
+  border-radius: var(--r-pill);
+  background-color: var(--well);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 3px var(--edge-well);
+  overflow: hidden;
+}
+
+.level-meter-fill {
+  position: relative;
+  height: 100%;
+  background: linear-gradient(90deg, var(--success), var(--success-2));
+  border-radius: var(--r-pill);
+  transition: width 80ms linear;
+  overflow: hidden;
+}
+
+.level-meter-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.5) 50%, transparent 80%);
+  animation: shimmer 1.8s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.level-meter-fill.clipping {
+  background: linear-gradient(90deg, var(--danger), var(--danger-2));
+}
+
+/* --- install / progress bars ----------------------------------------------- */
+
+.progress-track {
+  display: block;
+  margin-top: 0.4rem;
+  width: 100%;
+  max-width: 16rem;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--well);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 3px var(--edge-well);
+  overflow: hidden;
+}
+
+.progress-fill {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--accent-strong);
+  transition: width var(--t-med) var(--ease);
+  overflow: hidden;
+}
+
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.45) 50%, transparent 80%);
+  animation: shimmer 1.8s linear infinite;
+}
+
+.progress-fill.failed {
+  background: var(--danger-strong);
+}
+
+/* --- pipeline checklist (§22) --------------------------------------------- */
+
+.stage-list {
+  list-style: none;
+  margin: 0.9rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  transition: color var(--t-med) var(--ease);
+}
+
+.stage-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5em;
+  height: 1.5em;
+  flex-shrink: 0;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  font-weight: 800;
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-top);
+  color: var(--text-dim);
+  transition: background var(--t-med) var(--ease), color var(--t-med) var(--ease),
+    border-color var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease);
+}
+
+.stage.done {
+  color: var(--success);
+}
+
+.stage.done .stage-icon {
+  background: linear-gradient(135deg, var(--success), var(--success-2));
+  color: var(--success-ink);
+  border-color: transparent;
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.stage.active {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.stage.active .stage-icon {
+  background: var(--accent-strong);
+  color: var(--accent-ink);
+  border-color: transparent;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.stage.pending {
+  opacity: 0.55;
+}
+
+.stage.failed {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.stage.failed .stage-icon {
+  background: var(--danger-strong);
+  color: var(--danger-ink);
+  border-color: transparent;
+  box-shadow: 0 0 0 3px var(--danger-soft);
+}
+
+/* --- meeting detail ------------------------------------------------------- */
+
+.meeting-header h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.3rem;
+  line-height: 1.3;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.meeting-header form {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  margin-bottom: 0.4rem;
+}
+
+.meeting-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.audio-player {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--well);
+  border: 1px solid var(--edge);
+  border-top-color: var(--edge-well);
+  box-shadow: inset 0 1px 3px var(--edge-well);
+  border-radius: var(--r-md);
+}
+
+.audio-player audio {
+  flex: 1;
+  min-width: 15rem;
+  height: 32px;
+  border-radius: var(--r-sm);
+}
+
+/* --- transcript (§23) ----------------------------------------------------- */
+
+.transcript-view {
+  display: block;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+}
+
+.toolbar input[type="search"] {
+  flex: 2;
+  min-width: 10rem;
+}
+
+.toolbar select {
+  flex: 1;
+  min-width: 8rem;
+}
+
+.speaker-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25em 0.7em;
+  border-radius: var(--r-pill);
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-top);
+  font-size: 0.78rem;
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.chip:hover {
+  background: var(--panel-hover);
+  border-color: var(--accent-line);
+}
+
+.chip input {
+  width: 7rem;
+  padding: 0.1em 0.35em;
+  font-size: 0.78rem;
+  border-radius: 5px;
 }
 
 .transcript {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  max-height: 360px;
+  gap: 0.1rem;
+  max-height: 27rem;
   overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 .transcript-segment {
   display: flex;
   gap: 0.75rem;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid var(--border);
+  padding: 0.55rem 0.5rem;
+  border-radius: var(--r-sm);
+  border-bottom: 1px solid var(--divider);
+  transition: background var(--t-fast) var(--ease);
+}
+
+.transcript-segment:hover {
+  background: var(--panel-hover);
 }
 
 .transcript-segment:last-child {
@@ -258,33 +1424,325 @@ button:disabled {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
-  font-size: 0.8rem;
-  width: 3.2em;
-  padding-top: 0.15em;
+  font-size: 0.78rem;
+  font-weight: 600;
+  width: 4.6em;
+  text-align: left;
+  padding: 0.15em 0 0;
+}
+
+button.timestamp {
+  border: none;
+  background: none;
+  box-shadow: none;
+}
+
+button.timestamp:hover:not(:disabled) {
+  color: var(--accent);
+  background: none;
+  box-shadow: none;
 }
 
 .speaker {
   flex-shrink: 0;
-  width: 5.5em;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--accent);
+  width: 6.5em;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent-2);
   padding-top: 0.15em;
+  overflow-wrap: break-word;
 }
 
 .transcript-text {
   flex: 1;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #17181c;
-    --surface: #1f2126;
-    --border: #2e3038;
-    --text: #f2f3f5;
-    --text-muted: #9aa0ab;
-    --accent: #6366f1;
-    --accent-hover: #7476f3;
+mark {
+  background: var(--mark-bg);
+  color: var(--mark-ink);
+  border-radius: 3px;
+  padding: 0 0.2em;
+  font-weight: 600;
+}
+
+/* --- minutes (§24) -------------------------------------------------------- */
+
+.mom-view section {
+  margin-bottom: 0.6rem;
+}
+
+.mom-view p {
+  margin: 0.3rem 0;
+}
+
+.inline-list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.3rem 0;
+  padding: 0;
+}
+
+.inline-list li {
+  padding: 0.2em 0.7em;
+  border-radius: var(--r-pill);
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-top);
+  font-size: 0.8rem;
+}
+
+.evidenced-list,
+.action-items {
+  list-style: none;
+  margin: 0.3rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.evidenced-list li,
+.action-items li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--edge);
+  border-left: 3px solid var(--accent);
+  background: var(--well);
+  box-shadow: inset 0 1px 0 var(--edge-top);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+}
+
+.evidenced-list li:hover,
+.action-items li:hover {
+  background: var(--well-hover);
+  border-color: var(--edge-strong);
+  border-left-color: var(--accent);
+  transform: translateX(2px);
+}
+
+.evidence,
+.action-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.action-description {
+  line-height: 1.55;
+}
+
+.confidence {
+  padding: 0.1em 0.55em;
+  border-radius: 6px;
+  font-weight: 700;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.confidence.high {
+  color: var(--success);
+  background: var(--success-soft);
+}
+
+.confidence.medium {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.confidence.low {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.mom-provenance {
+  margin-top: 1.1rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--divider);
+}
+
+/* --- history (§25) -------------------------------------------------------- */
+
+.history-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.history-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  background: var(--panel-quiet);
+  box-shadow: var(--sh-ambient-sm), inset 0 1px 0 var(--edge-top);
+  text-align: left;
+  white-space: normal;
+  transition: background-color var(--t-med) var(--ease), border-color var(--t-med) var(--ease),
+    box-shadow var(--t-med) var(--ease), transform var(--t-fast) var(--ease);
+}
+
+.history-row:hover {
+  background: var(--panel-hover);
+  border-color: var(--accent-line);
+  box-shadow: var(--sh-lift), inset 0 1px 0 var(--edge-top);
+  transform: translateY(-1px);
+}
+
+.history-title {
+  font-size: 0.97rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.76rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.history-meta .marker {
+  margin-left: 0;
+}
+
+/* --- settings (§27) ------------------------------------------------------- */
+
+.host-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.75rem;
+  margin: 0 0 0.85rem;
+}
+
+.host-grid > div {
+  padding: 0.6rem 0.75rem;
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  box-shadow: var(--sh-ambient-sm), inset 0 1px 0 var(--edge-top);
+  border-radius: var(--r-md);
+}
+
+.host-grid dt {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.host-grid dd {
+  margin: 0.2rem 0 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.model-group {
+  overflow-x: auto;
+  border-radius: var(--r-md);
+}
+
+.model-table {
+  width: 100%;
+  min-width: 30rem;
+  border-collapse: collapse;
+  font-size: 0.83rem;
+}
+
+.model-table th {
+  text-align: left;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  font-weight: 700;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--divider);
+}
+
+.model-table td {
+  padding: 0.65rem 0.6rem;
+  border-bottom: 1px solid var(--divider);
+  vertical-align: top;
+}
+
+.model-table tr:last-child td {
+  border-bottom: none;
+}
+
+.model-table tbody tr {
+  transition: background var(--t-fast) var(--ease);
+}
+
+.model-table tbody tr:hover {
+  background: var(--panel-hover);
+}
+
+.model-label {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.model-notes,
+.install-progress {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.install-progress {
+  font-variant-numeric: tabular-nums;
+  color: var(--accent-2);
+  font-weight: 600;
+}
+
+.model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.model-actions button {
+  padding: 0.4em 0.85em;
+  font-size: 0.8rem;
+}
+
+/* The Tauri window opens at 1100x760 and can be resized down to 800x600;
+   below that everything stacks. The content region (`.content-scroll`)
+   absorbs the height difference by scrolling — the window itself never grows
+   or clips at either size. */
+@media (max-width: 640px) {
+  .field {
+    min-width: 100%;
+  }
+
+  .transcript-segment {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .speaker,
+  .timestamp {
+    width: auto;
   }
 }

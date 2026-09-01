@@ -52,3 +52,11 @@ Levers not yet tried, in rough order of expected value:
 ## Not yet measured
 
 Peak RAM, peak CPU, and thermals per stage (§29 asks for all three); LLM generation speed and memory (Phase 6); anything on 30/45/60-minute or Tamil/code-switched audio.
+
+## Per-stage measurement infrastructure (new capability, not new numbers)
+
+Every real pipeline run now measures itself. `pipeline::proc::run_measured` wraps every native-binary stage (whisper.cpp, sherpa-onnx) in wall-clock timing plus peak-working-set sampling (`system::peak_working_set_mb`, polled every 250ms via `K32GetProcessMemoryInfo` while the process runs, plus a final sample before the handle closes). `pipeline::run` collects these into a `RunMetrics` struct — per-stage wall time and peak RAM for diarization and STT, plus preprocess/align/MoM timing and the overall total — and writes it to `metrics.json` beside the meeting's other artifacts on every run, not only inside a benchmark. `RunMetrics::realtime_factor()` expresses total processing time as a multiple of meeting length, which is the unit §29's target is stated in (0.167x ≈ 10 minutes for a 60-minute meeting).
+
+`bench_cli full <audio.wav>` runs the whole pipeline once, prints the same per-stage table, and computes the §29 budget check automatically (`audio_ms * 0.167` vs. actual total, reported as MET or MISSED-by-N-seconds) — this replaces doing that arithmetic by hand as was done for the single sample below. `bench_cli llm <transcript.json>` similarly reports each candidate LLM's peak RAM against the §4 hard limit.
+
+**This section describes new capability, not a new measurement.** No benchmark was actually executed in the work that added `proc.rs`/`RunMetrics`/`bench_cli` — there was no compiler available in that environment to build and run it. The 57.4s single-sample numbers above (thread scaling, end-to-end pipeline) remain the only real data this project has. Once a Rust toolchain is available, `bench_cli full` on a real 30/45/60-minute recording is the next step, and it will produce `metrics.json` output in the same shape described here — but that run has not happened, and no number in this document should be assumed to reflect it.

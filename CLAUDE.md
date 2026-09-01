@@ -8,7 +8,7 @@ EchoMind is a local-first meeting transcription system: a single Windows desktop
 
 Hard constraints: **no cloud STT, no cloud LLM, no external AI APIs, no telemetry, no networked backend.** The AI runtime is Rust-orchestrated native binaries/libraries only (whisper.cpp, llama.cpp, an ONNX-based diarization/VAD library) — no Python or PyTorch ships in the app. After models are installed, the app must run with the Internet fully disconnected. V1 targets post-meeting processing (5–10 min latency acceptable), not real-time.
 
-`meeting-ai-app-PLAN.md` at the repo root is the authoritative spec — phased (Phase 0…15), with per-phase doc deliverables under `docs/`. Read the relevant plan section before implementing a phase. `docs/architecture.md` and `docs/models.md` record decisions already made and should be updated as architecture changes.
+`meeting-ai-app-PLAN.md` at the repo root is the authoritative spec — phased (Phase 0…15), with per-phase doc deliverables under `docs/`. Read the relevant plan section before implementing a phase. `docs/architecture.md`, `docs/models.md`, `docs/performance.md`, and `docs/privacy.md` record decisions already made and should be updated as architecture changes; `docs/model-benchmark.md` is the results template for the `bench_cli` harness below.
 
 Rust unit tests exist under `src-tauri/src/pipeline/` (`cargo test`). There is no frontend test suite.
 
@@ -25,21 +25,27 @@ npm run tauri build         # production Windows bundle
 cargo build                 # in src-tauri/ — Rust-only build
 cargo test                  # in src-tauri/ — Rust tests
 
-# headless pipeline run (audio → preprocess → diarize → STT → align), in src-tauri/
+# headless pipeline run (audio → preprocess → diarize → STT → align → MoM), in src-tauri/
 cargo run --bin pipeline_cli -- <audio.wav> [out-dir]
 
-.\scripts\setup-models.ps1   # installs the native binaries + model weights the pipeline needs
+# Phase 2/3/6/14 benchmark harness (STT / diarization / LLM / full pipeline), in src-tauri/
+# prints Markdown tables meant to be pasted into docs/model-benchmark.md
+cargo run --release --bin bench_cli -- <stt|diarize|llm|full> <input> [options]
+
+.\scripts\setup-models.ps1   # dev-time fallback; the in-app Model Manager (models_manager.rs) is the primary install path now
 ```
 
 There is no ESLint / Prettier / JS test runner configured. `npm run build` (via `tsc`) is the only frontend check.
 
 ## Architecture notes that span files
 
-**Single-process local pipeline.** Recording, STT, diarization, alignment, and MoM generation all run as local processes/libraries orchestrated from Rust — no HTTP contract, no client/server split, no shared job queue across machines. The old networked-backend client (`backend.rs`) and the UI's backend-URL field were deleted in Phase 8; [src-tauri/src/processing.rs](src-tauri/src/processing.rs) replaced them with local commands (`start_processing`/`get_processing_status`/`get_transcript`/`check_models`). The crate links no HTTP client at all now — keep it that way; `cargo tree | grep reqwest` returning nothing is a cheap check that nothing has crept back in.
+**Single-process local pipeline.** Recording, STT, diarization, alignment, and MoM generation all run as local processes/libraries orchestrated from Rust — no HTTP contract, no client/server split, no shared job queue across machines. The old networked-backend client (`backend.rs`) and the UI's backend-URL field were deleted in Phase 8; [src-tauri/src/processing.rs](src-tauri/src/processing.rs) (`start_processing`/`regenerate_mom`/`get_processing_status`), [src-tauri/src/library.rs](src-tauri/src/library.rs) (history/transcript/MoM/export/delete), and [src-tauri/src/configuration.rs](src-tauri/src/configuration.rs) (settings/`check_models`/Model Manager) replaced them with local commands — full list in `lib.rs`. The crate links no HTTP client for any of this — keep it that way; `cargo tree | grep reqwest` returning nothing is a cheap check that nothing has crept back in. (The two narrow exceptions, neither a general HTTP client: `models_manager.rs`'s `curl.exe`/`tar.exe` shellouts for one-time model downloads, and `pipeline/llm/http.rs`'s hand-rolled loopback-only client driving `llama-server.exe`. See `docs/privacy.md`.)
 
 **Windows audio is Rust, not Web Audio.** [src-tauri/src/audio.rs](src-tauri/src/audio.rs) uses `cpal`. The recording stream runs on its own dedicated OS thread for its whole lifetime because cpal's WASAPI backend is COM apartment-threaded — the stream is never moved across threads; only control channels + an atomic level meter cross the boundary. Writes 16-bit PCM WAV via `hound` to `app_data_dir/meetings/<meeting-id>/original.wav`. This module is fully local already and needs no changes for the pipeline to build on top of it.
 
 **Model abstraction.** The master prompt (§5–§7, §19) wants STT/diarization/LLM providers swappable behind clean interfaces so models can be changed after benchmarking, without touching the UI or pipeline glue.
+
+**Machine memory tiering — do not assume 32 GB.** [src-tauri/src/system.rs](src-tauri/src/system.rs) detects total RAM and buckets the machine into a `MemoryProfile` (`Low` < 12 GB, `Balanced` 12–24 GB — the 16 GB laptop case, `High` ≥ 24 GB — the reference machine), each with its own default STT/LLM model, LLM context size, and LLM RAM budget. [src-tauri/src/settings.rs](src-tauri/src/settings.rs)'s `Settings::effective_*` methods resolve a user's optional overrides against that profile, and everything downstream (`PipelineConfig`, `ModelPaths`, thread counts) reads through those methods rather than hard-coding a model id or thread count. A 16 GB and a 32 GB machine are expected to select different default models by design — check `effective_llm_model()`/`effective_stt_model()` before assuming which one is in play.
 
 ## Project-specific gotchas
 

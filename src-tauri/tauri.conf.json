@@ -12,13 +12,20 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "EchoMind",
-        "width": 800,
-        "height": 600
+        "width": 1100,
+        "height": 760,
+        "minWidth": 800,
+        "minHeight": 600
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/meetings/**"]
+      }
     }
   },
   "bundle": {

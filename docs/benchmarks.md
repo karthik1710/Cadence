@@ -4,9 +4,9 @@ Which models Cadence runs, what has actually been measured, what has not, and ho
 
 ## Read this first: what is and isn't measured
 
-**One real measurement exists.** A single 57.4-second English recording (laptop mic, two speakers, one heavily dominant, unlabelled) produced the thread-scaling and end-to-end numbers below. That's it.
+**Two real measurements exist.** A 57.4-second English recording (laptop mic, two speakers, one heavily dominant, unlabelled) produced the thread-scaling and end-to-end numbers below. A second, 26-second two-speaker recording (also unlabelled beyond "two people") was run through `bench_cli diarize` after the default cluster threshold was found to be silently merging real speakers — see the Diarization section below. That's still it.
 
-**Nothing else has been benchmarked.** `bench_cli` — the harness for Phases 2 (STT), 3 (diarization), 6 (LLM), and 14 (full pipeline) — was written and unit-tested to the level `cargo test` reaches, but **has never been executed against real audio**. It compiles and its unit tests pass; no benchmark run has happened. There are no 30/45/60-minute results, no Tamil or code-switched results, no WER, no labelled-speaker-count results, and no LLM quality scores.
+**Nothing else has been benchmarked.** `bench_cli` — the harness for Phases 2 (STT), 3 (diarization), 6 (LLM), and 14 (full pipeline) — was written and unit-tested to the level `cargo test` reaches, and Phase 3 (diarization) has now been run against real audio twice; the rest **has never been executed against real audio**. There are no 30/45/60-minute results, no Tamil or code-switched results, no WER, no labelled-speaker-count results, and no LLM quality scores.
 
 **So every model choice below is provisional.** The whisper model size, the diarization cluster threshold, and the memory-tier default LLMs are what ships because *something* has to run out of the box (project rule: no model is permanently selected before it has been benchmarked on this project\x27s own audio). None is a conclusion. Nothing in this document should be read as a ranking.
 
@@ -91,19 +91,31 @@ Look for: does `code-switched` keep Tamil in Tamil script *and* English in Latin
 
 sherpa-onnx offline speaker diarization (pyannote segmentation 3.0 + WeSpeaker CAM++ embeddings, both ONNX), invoked from Rust. Native `pyannote-audio` was rejected to keep the runtime Python-free; ONNX-ported quality versus native pyannote remains an open risk.
 
-**The default cluster threshold over-splits.** sherpa-onnx clusters by distance threshold (`--clustering.cluster-threshold`, default 0.5) when speaker count isn't given up front. On the 57.4s sample that default produced **8 speaker ids for essentially one dominant voice plus a faint second**:
+**No single cluster threshold has worked on both samples tried so far.** sherpa-onnx clusters by distance threshold (`--clustering.cluster-threshold`, default 0.5) when speaker count isn't given up front. On the original 57.4s sample, that default produced **8 speaker ids for essentially one dominant voice plus a faint second** — badly over-split:
 
 | threshold | speaker ids | dominant voice |
 |---|---|---|
-| 0.5 (default) | 8 | fragmented across many ids |
+| 0.5 (sherpa-onnx default) | 8 | fragmented across many ids |
 | 0.6 | 5 | fragmented |
 | 0.7 | 4 | consolidated (36.5s in one id) |
 | 0.8 | 4 | consolidated, second voice still separate (4.6s) |
 | 0.9 | 2 | second voice largely absorbed into the first |
 
-Cadence ships **0.8** (`DEFAULT_CLUSTER_THRESHOLD` in `pipeline/mod.rs`). **This rests on one unlabelled sample and establishes only that 0.5 is wrong here.** Phase 3 needs labelled 3/5/10-speaker recordings with real headcounts to settle it, and should test `--clustering.num-clusters` for the case where the organizer knows the headcount.
+Raising the default to 0.8 fixed that sample. It then shipped unexamined against any *other* sample until a second, cleaner 26-second two-speaker recording surfaced the opposite failure — 0.8 silently merged both speakers into one id, which erases speaker attribution outright rather than just fragmenting it:
 
-**Alignment limitation.** Attribution is per STT segment by maximum overlap, so a fast two-way exchange inside one whisper segment collapses onto the dominant speaker — on the test recording, a 30s back-and-forth rendered as one Person 1 turn. Fixing it properly needs word-level STT timestamps or finer diarization segments; evaluate during Phase 3/4 refinement, not by tuning the merge gap.
+| threshold | speakers | segments | longest speaker share |
+|---|---|---|---|
+| 0.4 | 2 | 7 | 68% |
+| 0.45 | 2 | 7 | 68% |
+| 0.5 | 2 | 7 | 68% |
+| 0.55 | 1 | 4 | 100% |
+| 0.6 – 0.8 | 1 | 4 | 100% |
+
+(`bench_cli diarize <wav> --thresholds 0.4,0.45,0.5,0.55,0.6,0.65,0.7,0.75,0.8`.) The cliff between correct (≤0.5) and fully collapsed (≥0.55) is sharp and sits well inside the "consolidated" range the first sample called good.
+
+**Cadence now ships 0.5** (`DEFAULT_CLUSTER_THRESHOLD` in `settings.rs`) — back to sherpa-onnx's own default. The reasoning: a full collapse (0.8, second sample) destroys per-speaker attribution completely, while over-splitting (0.5, first sample) at least leaves every speaker distinguishable under some id, so a human skimming the transcript can still tell people apart even if the labels are noisier than they should be. **This is a judgment call between two failure modes on two small samples, not a resolved question.** Phase 3 still needs labelled 3/5/10-speaker recordings with real headcounts to settle it properly, and should test `--clustering.num-clusters` for the case where the organizer knows the headcount. Until then, the Settings screen's "Speaker cluster threshold" field is the escape hatch for a recording that lands on the wrong side of the cliff — raise it if one person is being split across ids, lower it if two people are being merged into one.
+
+**Alignment limitation.** Attribution is per STT segment by maximum overlap, so a fast two-way exchange inside one whisper segment collapses onto the dominant speaker — on the 57.4s sample, a 30s back-and-forth rendered as one Person 1 turn. The 26s sample shows the same shape: whisper.cpp split it into 5 well-formed turns, but because diarization at 0.8 returned only one speaker id for the whole clip, every turn aligned to it regardless — so this limitation and the clustering threshold compound rather than being independent bugs. Fixing alignment properly needs word-level STT timestamps or finer diarization segments; evaluate during Phase 3/4 refinement, not by tuning the merge gap.
 
 ### LLM — llama.cpp
 

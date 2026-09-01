@@ -27,7 +27,7 @@ The recording → transcript → MoM path is implemented end to end, entirely on
 These are carried forward deliberately rather than closed by assertion.
 
 1. **Compiles and unit-tests pass, but has not been exercised on a real meeting end to end.** `cargo build`, `cargo test` (240 passing), and `npm run build` all succeed. That is not the same as the pipeline having been run against real audio in the app — which remains unverified.
-2. **No benchmark has ever been executed.** The whisper model size, the 0.8 diarization cluster threshold, and the memory-tier default LLMs are unvalidated defaults. See [benchmarks.md](benchmarks.md).
+2. **No sized benchmark has ever been executed.** The whisper model size and the memory-tier default LLMs are unvalidated defaults. The diarization cluster threshold now has a small threshold-sweep result (two conflicting samples, `bench_cli diarize`) but still needs labelled 3/5/10-speaker recordings to settle for real. See [benchmarks.md](benchmarks.md).
 3. **No Tamil or code-switched audio has been through the pipeline**, though mixed English/Tamil is a hard V1 requirement. This now blocks judging MoM quality on Tanglish content, not just STT accuracy.
 4. **Processing time may miss its target.** The one small sample extrapolates to roughly 15 minutes for a 60-minute meeting, against a 10-minute target — and that was measured before the LLM stage existed.
 5. **Model integrity is trust-on-first-install.** No pinned upstream hashes; a digest recorded at install time cannot detect a download that was already compromised. Worth hardening before packaging, especially on machines running enterprise EDR.

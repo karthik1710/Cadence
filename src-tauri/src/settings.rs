@@ -99,11 +99,17 @@ impl Default for Settings {
     }
 }
 
-/// Provisional. On the one 57s sample available, sherpa-onnx's own default
-/// (0.5) shattered a single dominant voice into 8 speaker ids, while 0.9
-/// absorbed the second voice into the first. See docs/benchmarks.md — this needs
-/// re-testing against labelled 3/5/10-speaker recordings (Phase 3).
-pub const DEFAULT_CLUSTER_THRESHOLD: f32 = 0.8;
+/// Provisional, and now known to conflict across the only two samples tested.
+/// On a 57s noisy single-dominant-voice sample, sherpa-onnx's own default
+/// (0.5) shattered that one voice into 8 speaker ids, so Cadence shipped 0.8
+/// instead — which then collapsed a clean 26s two-speaker sample into a
+/// single id (0.55 and above all do). 0.5 is back because a full collapse
+/// erases per-speaker attribution entirely, the worse failure of the two,
+/// and it matches sherpa-onnx's own tuning. See docs/benchmarks.md — this
+/// still needs labelled 3/5/10-speaker recordings (Phase 3) to settle for
+/// real; until then, the Settings screen lets a user raise it back up if a
+/// specific recording over-splits.
+pub const DEFAULT_CLUSTER_THRESHOLD: f32 = 0.5;
 
 /// These meetings are English + Tamil in the same sentence,
 /// so the whole-file single detection whisper.cpp's `auto` performs is the

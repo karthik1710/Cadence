@@ -134,7 +134,11 @@
      spinners match the theme without per-element rules. */
   --color-scheme: dark;
 
-  font-family: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  /* "Nirmala UI" is Windows' Tamil face and is listed explicitly: Segoe UI
+     carries no Tamil glyphs, so without it a code-switched line (§8) falls
+     back implicitly and renders Tamil and Latin in two faces with different
+     baselines — on exactly the content this app exists to produce. */
+  font-family: "Segoe UI", "Nirmala UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   font-size: 14px;
   line-height: 1.55;
   color: var(--text);
@@ -538,7 +542,7 @@ body {
 
 code,
 .data-dir {
-  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-family: "Cascadia Mono", Consolas, "Nirmala UI", "Courier New", monospace;
   font-size: 0.82em;
   background: var(--well);
   border: 1px solid var(--edge);
@@ -1745,4 +1749,18 @@ mark {
   .timestamp {
     width: auto;
   }
+}
+
+/* Detected-language tag on a transcript turn (§8 code-switching). Quiet by
+   design: it is metadata about the turn, not part of what was said. */
+.lang-tag {
+  align-self: center;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--r-pill);
+  background: var(--well);
+  color: var(--text-dim);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }

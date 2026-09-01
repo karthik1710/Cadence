@@ -513,6 +513,18 @@ export function SettingsView({ onSetupChanged, onThemeSaved }: Props) {
                 />
               </label>
               <label className="field">
+                <span>Spoken language</span>
+                <select
+                  value={settings.stt_language}
+                  onChange={(e) => update({ stt_language: e.currentTarget.value })}
+                >
+                  <option value="code-switched">Mixed Tamil + English</option>
+                  <option value="auto">Auto-detect (one language)</option>
+                  <option value="ta">Tamil only</option>
+                  <option value="en">English only</option>
+                </select>
+              </label>
+              <label className="field">
                 <span>Minutes language</span>
                 <input
                   value={settings.mom_language}

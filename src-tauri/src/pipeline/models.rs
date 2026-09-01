@@ -17,6 +17,12 @@ pub struct SttSegment {
     pub text: String,
     #[serde(default)]
     pub words: Vec<SttWord>,
+    /// ISO code of the language whisper detected for the block this segment
+    /// came from (§8). Only code-switched mode detects per block, so it is
+    /// `None` in every other mode — and omitted from `stt.json` entirely, so
+    /// a file written before this existed reads back identically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 /// Raw diarization interval — `speaker_id` is sherpa-onnx's own numeric label
@@ -38,7 +44,18 @@ pub struct TranscriptSegment {
     pub start_ms: i64,
     pub end_ms: i64,
     pub text: String,
+    /// Detected language for this turn (§8): an ISO code, or [`MIXED_LANGUAGE`]
+    /// when the turn was assembled from fragments whisper detected differently.
+    /// `None` outside code-switched mode, and skipped when serializing so an
+    /// older `transcript.json` round-trips unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
+
+/// Marks a turn that spans more than one detected language — the thing §8
+/// exists for. Not an ISO code, and deliberately not one: no ISO 639 code is
+/// `"mixed"`, so nothing downstream can confuse the two.
+pub const MIXED_LANGUAGE: &str = "mixed";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Transcript {
@@ -604,6 +621,43 @@ mod tests {
     }
 
     #[test]
+    fn a_transcript_written_before_language_tags_existed_still_loads() {
+        // Exactly the shape `transcript.json` had before §8's per-block
+        // detection: a meeting on disk must not become unreadable.
+        let raw = r#"{
+            "meeting_id": "abc",
+            "segments": [
+                {"speaker": "SPEAKER_00", "speaker_label": "Person 1",
+                 "start_ms": 0, "end_ms": 2000, "text": "hello"}
+            ]
+        }"#;
+        let transcript: Transcript = serde_json::from_str(raw).unwrap();
+        assert_eq!(transcript.segments[0].language, None);
+        // ...and it round-trips back out without gaining an empty field.
+        let out = serde_json::to_string(&transcript).unwrap();
+        assert!(!out.contains("language"), "{out}");
+    }
+
+    #[test]
+    fn an_stt_file_written_before_language_tags_existed_still_loads() {
+        let raw = r#"[{"start_ms": 0, "end_ms": 2000, "text": "hello"}]"#;
+        let segments: Vec<SttSegment> = serde_json::from_str(raw).unwrap();
+        assert_eq!(segments[0].language, None);
+        assert!(segments[0].words.is_empty());
+        assert!(!serde_json::to_string(&segments).unwrap().contains("language"));
+    }
+
+    #[test]
+    fn a_language_tag_survives_a_round_trip() {
+        let raw = r#"[{"start_ms": 0, "end_ms": 2000, "text": "வணக்கம்", "language": "ta"}]"#;
+        let segments: Vec<SttSegment> = serde_json::from_str(raw).unwrap();
+        assert_eq!(segments[0].language.as_deref(), Some("ta"));
+        assert!(serde_json::to_string(&segments)
+            .unwrap()
+            .contains("\"language\":\"ta\""));
+    }
+
+    #[test]
     fn transcript_reports_its_speakers_in_first_appearance_order() {
         let transcript = Transcript {
             meeting_id: "m".to_string(),
@@ -614,6 +668,7 @@ mod tests {
                     start_ms: 0,
                     end_ms: 1000,
                     text: "hello".to_string(),
+                    language: None,
                 },
                 TranscriptSegment {
                     speaker: "SPEAKER_00".to_string(),
@@ -621,6 +676,7 @@ mod tests {
                     start_ms: 1000,
                     end_ms: 2500,
                     text: "hi".to_string(),
+                    language: None,
                 },
                 TranscriptSegment {
                     speaker: "SPEAKER_01".to_string(),
@@ -628,6 +684,7 @@ mod tests {
                     start_ms: 2500,
                     end_ms: 3000,
                     text: "again".to_string(),
+                    language: None,
                 },
             ],
         };

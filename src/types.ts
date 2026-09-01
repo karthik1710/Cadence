@@ -61,6 +61,9 @@ export interface TranscriptSegment {
   start_ms: number;
   end_ms: number;
   text: string;
+  /** Language whisper detected for this turn, when transcribed in
+   * code-switched mode. Null when a single language covered the recording. */
+  language: string | null;
 }
 
 export interface Transcript {
@@ -109,6 +112,8 @@ export interface Mom {
 }
 
 export interface Settings {
+  /** "auto" | "code-switched" | an ISO code such as "ta"/"en" (§8). */
+  stt_language: string;
   input_device: string | null;
   profile: string;
   stt_model: string | null;

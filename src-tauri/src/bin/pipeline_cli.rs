@@ -12,6 +12,8 @@
 //!   --stt <model-id>    override the STT model (e.g. whisper-base)
 //!   --llm <model-id>    override the language model (e.g. qwen3-4b-q4)
 //!   --language <name>   output language for the minutes (default English)
+//!   --stt-language <m>  auto | code-switched | an ISO code (§8, default
+//!                       code-switched)
 //! ```
 
 use app_lib::pipeline::{self, paths::ModelPaths, PipelineConfig, RunRequest};
@@ -51,6 +53,10 @@ fn parse_args() -> Result<Args, String> {
             "--llm" => settings.llm_model = Some(args.next().ok_or("--llm needs a value")?),
             "--language" => {
                 settings.mom_language = args.next().ok_or("--language needs a value")?
+            }
+            "--stt-language" => {
+                settings.stt_language =
+                    args.next().ok_or("--stt-language needs a value")?
             }
             other if other.starts_with("--") => {
                 return Err(format!("unknown option: {other}"))
@@ -171,9 +177,16 @@ fn run() -> Result<(), String> {
         ram(m.diarization.peak_ram_mb)
     );
     println!(
-        "  stt:         {:>7.1}s  peak {}",
+        "  stt:         {:>7.1}s  peak {}  {}",
         m.stt.wall_ms as f64 / 1000.0,
-        ram(m.stt.peak_ram_mb)
+        ram(m.stt.peak_ram_mb),
+        match m.stt_blocks {
+            // §8: how many blocks whisper saw, and what it detected in them —
+            // one language on a meeting known to be mixed is the thing to look
+            // at, and it is invisible without this line.
+            Some(blocks) => format!("{blocks} blocks, detected: {}", m.stt_languages.join(" ")),
+            None => "single pass".to_string(),
+        }
     );
     println!("  align:       {:>7.1}s", m.align_ms as f64 / 1000.0);
     println!("  minutes:     {:>7.1}s", m.mom_ms as f64 / 1000.0);
@@ -192,6 +205,15 @@ fn run() -> Result<(), String> {
             println!("(the transcript above is unaffected and saved)");
         }
         (None, None) => println!("\nminutes: skipped"),
+    }
+
+    // §33: a stage that could not run says so. Silently degraded output is the
+    // failure mode this project cares most about.
+    if !m.warnings.is_empty() {
+        println!("\nwarnings:");
+        for warning in &m.warnings {
+            println!("  - {warning}");
+        }
     }
 
     print_preview(&args.out_dir, transcript);

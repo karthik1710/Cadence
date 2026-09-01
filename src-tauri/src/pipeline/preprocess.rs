@@ -370,22 +370,33 @@ pub fn read_mono_16k(path: &Path) -> Result<(Vec<f32>, u32, u16), String> {
 /// Writes 16-bit mono PCM at 16 kHz — the format every downstream native tool
 /// in this pipeline expects.
 pub fn write_mono_16k(path: &Path, samples: &[f32]) -> Result<(), String> {
+    let bytes = encode_mono_16k(samples)?;
+    std::fs::write(path, bytes).map_err(|e| format!("could not write {}: {e}", path.display()))
+}
+
+/// The same WAV, in memory. Code-switched STT (§8) cuts dozens of blocks out
+/// of one recording and posts each to whisper-server; none of them is an
+/// artifact worth keeping, so none of them touches the disk.
+pub fn encode_mono_16k(samples: &[f32]) -> Result<Vec<u8>, String> {
     let spec = WavSpec {
         channels: 1,
         sample_rate: TARGET_SAMPLE_RATE,
         bits_per_sample: 16,
         sample_format: SampleFormat::Int,
     };
-    let mut writer = WavWriter::create(path, spec)
-        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
-    for &s in samples {
-        // 32767, not 32768: scaling by 32768 makes an exact -1.0/+1.0 sample
-        // wrap on the positive side.
-        let value = (s.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
-        writer.write_sample(value).map_err(|e| e.to_string())?;
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    {
+        let mut writer =
+            WavWriter::new(&mut buffer, spec).map_err(|e| format!("could not encode WAV: {e}"))?;
+        for &s in samples {
+            // 32767, not 32768: scaling by 32768 makes an exact -1.0/+1.0
+            // sample wrap on the positive side.
+            let value = (s.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+            writer.write_sample(value).map_err(|e| e.to_string())?;
+        }
+        writer.finalize().map_err(|e| e.to_string())?;
     }
-    writer.finalize().map_err(|e| e.to_string())?;
-    Ok(())
+    Ok(buffer.into_inner())
 }
 
 #[cfg(test)]

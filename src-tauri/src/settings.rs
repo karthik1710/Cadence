@@ -29,6 +29,9 @@ pub struct Settings {
     pub cluster_threshold: f32,
     /// llama.cpp context window; `None` means the profile's default.
     pub llm_context_tokens: Option<usize>,
+    /// How STT is told to handle language (§8). `"auto"`, `"code-switched"`,
+    /// or an explicit ISO code — see [`crate::pipeline::stt::SttLanguage`].
+    pub stt_language: String,
     /// Output language for generated minutes (§8 — the transcript itself is
     /// never translated, only the MoM).
     pub mom_language: String,
@@ -79,6 +82,7 @@ impl Default for Settings {
             llm_threads: None,
             cluster_threshold: DEFAULT_CLUSTER_THRESHOLD,
             llm_context_tokens: None,
+            stt_language: DEFAULT_STT_LANGUAGE.to_string(),
             mom_language: "English".to_string(),
             generate_mom: true,
             debug_logging: false,
@@ -100,6 +104,13 @@ impl Default for Settings {
 /// absorbed the second voice into the first. See docs/models.md — this needs
 /// re-testing against labelled 3/5/10-speaker recordings (Phase 3).
 pub const DEFAULT_CLUSTER_THRESHOLD: f32 = 0.8;
+
+/// §1 and §8 both say these meetings are English + Tamil in the same sentence,
+/// so the whole-file single detection whisper.cpp's `auto` performs is the
+/// wrong default *for this app*: it locks to whichever language opens the
+/// recording and degrades the other for the rest of it. A user with
+/// monolingual meetings can still pick `auto`, which is cheaper.
+pub const DEFAULT_STT_LANGUAGE: &str = "code-switched";
 
 /// A human voice bottoms out around 85 Hz, so everything below this corner is
 /// room noise: air conditioning, projector fans, desk thumps, mic handling.
@@ -351,6 +362,44 @@ mod tests {
         assert!(!loaded.denoise_enabled);
         assert!(loaded.vad_trim_silence);
         assert_eq!(loaded.vad_speech_pad_ms, 350);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stt_language_defaults_to_code_switched() {
+        // §1/§8: this app's meetings mix English and Tamil, so whisper's
+        // one-detection-per-file `auto` is the wrong default here.
+        assert_eq!(Settings::default().stt_language, "code-switched");
+        assert_eq!(DEFAULT_STT_LANGUAGE, "code-switched");
+    }
+
+    #[test]
+    fn a_settings_file_written_before_stt_language_existed_still_loads() {
+        let dir = std::env::temp_dir().join("cadence-settings-stt-language");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("config")).unwrap();
+        std::fs::write(
+            dir.join("config").join("settings.json"),
+            r#"{"profile":"high","mom_language":"Tamil","cluster_threshold":0.7}"#,
+        )
+        .unwrap();
+        let loaded = load(&dir);
+        assert_eq!(loaded.profile, "high");
+        assert_eq!(loaded.cluster_threshold, 0.7);
+        assert_eq!(loaded.stt_language, DEFAULT_STT_LANGUAGE);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_forced_stt_language_round_trips_through_disk() {
+        let dir = std::env::temp_dir().join("cadence-settings-forced-language");
+        let _ = std::fs::remove_dir_all(&dir);
+        let s = Settings {
+            stt_language: "ta".to_string(),
+            ..Settings::default()
+        };
+        save(&dir, &s).unwrap();
+        assert_eq!(load(&dir).stt_language, "ta");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

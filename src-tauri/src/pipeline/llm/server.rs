@@ -6,7 +6,7 @@
 //! on 16 GB, several gigabytes held by an idle inference server is the
 //! difference between a responsive laptop and a swapping one.
 
-use super::http;
+use crate::pipeline::http;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};

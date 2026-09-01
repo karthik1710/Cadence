@@ -6,10 +6,13 @@
 //! benchmarks exist). [`LlamaCppProvider`] is the shipped implementation;
 //! [`MockLlm`] is what the tests use.
 
-pub mod http;
 pub mod server;
 
 use crate::models_manager;
+// The loopback client lives in `pipeline::http`: whisper-server joined
+// llama-server in being driven over a local socket, so it is no longer the
+// LLM layer's alone.
+use crate::pipeline::http;
 use crate::pipeline::paths::ModelPaths;
 use crate::settings::Settings;
 use crate::system::{HostInfo, MemoryProfile};

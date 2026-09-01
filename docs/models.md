@@ -26,11 +26,66 @@ Living document — updated as benchmarks (master prompt Phases 2, 3, 6) produce
 
 **Known limitation to test for, not assume away:** all ASR models (Whisper included) make more errors right at a language-switch boundary than within a monolingual stretch — there's no clean fix, only benchmarking against real Tanglish audio to see how bad it is. Include "code-switched Tamil/English" as an explicit case in the master prompt's §29 benchmark dataset (test D).
 
-**First real run (2026-08-31).** whisper.cpp `ggml-small.bin` through the Rust pipeline on a 57.4s English laptop-mic recording: 6.2s at 24 threads (0.11x realtime) — see `docs/performance.md`. Language auto-detect picked `en` at p=0.57, a low confidence worth watching once Tamil/Tanglish audio is tested. The `--max-len 80 --split-on-word --max-context 0` flags were in place and no content collapse recurred. Still missing: any WER measurement, any Tamil or code-switched sample, and anything longer than a minute.
+**First real run (2026-08-31).** whisper.cpp `ggml-small.bin` through the Rust pipeline on a 57.4s English laptop-mic recording: 6.2s at 24 threads (0.11x realtime) — see `docs/performance.md`. Language auto-detect picked `en` at p=0.57, a low confidence worth watching once Tamil/Tanglish audio is tested. The `--max-len 80 --split-on-word --max-context 0` flags were in place and no content collapse recurred. Still missing: any WER measurement, any Tamil or code-switched sample, and anything longer than a minute. Code-switching is now handled by a dedicated path rather than by `auto` — see the next section.
 
 **Model size not yet justified.** `small` was chosen by the setup script, not by benchmark. §6 wants `base`/`medium` compared against it on this project's own audio before committing.
 
 **Benchmark harness now exists, not yet run.** `cargo run --release --bin bench_cli -- stt <audio.wav> [--models whisper-base,whisper-small,whisper-medium] [--threads 8,24]` runs each model/thread combination through `stt::transcribe` and prints a Markdown table (wall time, realtime factor, peak RAM, segment/character counts), plus writes each model's raw transcript to a temp dir for manual accuracy comparison — WER needs a human reference transcript, which this tool does not generate. Same caveat as the LLM harness above: this was written and never executed, because no Rust toolchain was available in the environment that built it. Phase 2 still has no results.
+
+## Code-switching (English/Tamil) — §8
+
+**The problem `--language auto` does not solve.** whisper.cpp's `auto` detects a
+language once, from the opening window, and applies it to the whole file. In a
+Tanglish meeting that locks the decoder to whichever language was spoken first
+and degrades the other for the remainder: Tamil comes back romanized or dropped
+when locked to `en`, English garbled or transliterated when locked to `ta`. The
+setting looked like it handled code-switching; it did not.
+
+**What now happens.** `Settings.stt_language` selects the strategy:
+
+| value | behaviour |
+|---|---|
+| `code-switched` (**default**) | VAD splits the recording into blocks, each transcribed with its own language detection, then reassembled onto the original timeline. Each turn carries the language whisper detected for it. |
+| `auto` | the old single-detection path — cheapest, right for a monolingual meeting |
+| `ta` / `en` / any ISO code | forced, passed straight through |
+
+`code-switched` is the default because §1 and §8 both state this app's meetings
+*are* English + Tamil mixed; defaulting to a mode that mishandles that was wrong.
+
+`--translate` is never passed, in any mode. §8 requires the transcript preserve
+what was actually said; translation is the MoM stage's job and only for its own
+output language.
+
+**Timestamps.** Every timestamp whisper returns is relative to its block, while
+the transcript, diarization alignment, MoM evidence links and click-to-play all
+index the original recording. `pipeline/codeswitch.rs` remaps them, covered by
+23 unit tests including a non-first block, a segment on a block boundary, VAD
+gaps, and out-of-range clamping. A silent error here would misplace every
+evidence link in the app, so it is tested rather than assumed.
+
+**Rendering.** `"Nirmala UI"` is now explicit in the CSS font stacks. Segoe UI
+carries no Tamil glyphs, so mixed lines were falling back implicitly and
+rendering Tamil and Latin in two faces with different baselines.
+
+### Still unvalidated — this is implementation, not proof
+
+No Tamil or code-switched audio has been through this pipeline. The path exists
+and its logic is tested; its *accuracy* is unmeasured. To close that:
+
+```powershell
+cd src-tauri
+# transcribe the same recording three ways and compare by hand
+cargo run --release --bin pipeline_cli -- <tanglish.wav> out-cs   --language code-switched
+cargo run --release --bin pipeline_cli -- <tanglish.wav> out-auto --language auto
+cargo run --release --bin pipeline_cli -- <tanglish.wav> out-ta   --language ta
+```
+
+What to look for: does `code-switched` keep Tamil in Tamil script *and* English
+in Latin within the same turn, where the single-language runs mangle one of
+them? Are the per-turn language tags plausible at the switch points? Does the
+processing time still fit the §29 budget once blocks are transcribed separately?
+Record the answers here — a WER number against a hand-corrected reference is
+better still, and nothing else in this file substitutes for it.
 
 ## Diarization
 

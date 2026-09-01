@@ -1,4 +1,6 @@
-use crate::pipeline::models::{DiarizationSegment, SttSegment, TranscriptSegment};
+use crate::pipeline::models::{
+    DiarizationSegment, SttSegment, TranscriptSegment, MIXED_LANGUAGE,
+};
 use std::collections::HashMap;
 
 /// Consecutive same-speaker STT fragments closer than this are one turn.
@@ -25,6 +27,7 @@ pub fn align(stt: &[SttSegment], diarization: &[DiarizationSegment]) -> Vec<Tran
                 prev.end_ms = prev.end_ms.max(seg.end_ms);
                 prev.text.push(' ');
                 prev.text.push_str(&seg.text);
+                prev.language = merge_language(prev.language.as_deref(), seg.language.as_deref());
             }
             _ => turns.push(TranscriptSegment {
                 speaker,
@@ -32,6 +35,7 @@ pub fn align(stt: &[SttSegment], diarization: &[DiarizationSegment]) -> Vec<Tran
                 start_ms: seg.start_ms,
                 end_ms: seg.end_ms,
                 text: seg.text.clone(),
+                language: seg.language.clone(),
             }),
         }
     }
@@ -52,6 +56,20 @@ pub fn align(stt: &[SttSegment], diarization: &[DiarizationSegment]) -> Vec<Tran
     }
 
     turns
+}
+
+/// The language of a turn built from two fragments (§8).
+///
+/// Two fragments detected differently is the code switch itself, and the turn
+/// is honestly [`MIXED_LANGUAGE`] rather than whichever half came first. An
+/// untagged fragment (a single pass, which detects per file rather than per
+/// block) carries no information and never overrides one that does.
+fn merge_language(current: Option<&str>, incoming: Option<&str>) -> Option<String> {
+    match (current, incoming) {
+        (None, other) | (other, None) => other.map(|l| l.to_string()),
+        (Some(a), Some(b)) if a == b => Some(a.to_string()),
+        _ => Some(MIXED_LANGUAGE.to_string()),
+    }
 }
 
 fn speaker_for(seg: &SttSegment, diarization: &[DiarizationSegment]) -> String {
@@ -104,6 +122,14 @@ mod tests {
             end_ms,
             text: text.to_string(),
             words: Vec::new(),
+            language: None,
+        }
+    }
+
+    fn tagged(start_ms: i64, end_ms: i64, text: &str, language: &str) -> SttSegment {
+        SttSegment {
+            language: Some(language.to_string()),
+            ..stt(start_ms, end_ms, text)
         }
     }
 
@@ -186,5 +212,65 @@ mod tests {
         assert_eq!(segments[0].speaker, "SPEAKER_01");
         assert_eq!(segments[1].speaker_label, "Person 2");
         assert_eq!(segments[2].speaker_label, "Person 1");
+    }
+
+    // ------------------------------------------------------- language (§8)
+
+    #[test]
+    fn a_turn_in_one_language_keeps_that_language() {
+        let segments = align(
+            &[tagged(0, 2000, "one", "ta"), tagged(2100, 4000, "two", "ta")],
+            &[diar("0", 0, 4000)],
+        );
+        assert_eq!(segments.len(), 1, "same speaker, one turn");
+        assert_eq!(segments[0].language.as_deref(), Some("ta"));
+    }
+
+    #[test]
+    fn a_turn_that_switches_language_is_marked_mixed() {
+        let segments = align(
+            &[tagged(0, 2000, "நாம", "ta"), tagged(2100, 4000, "ship it", "en")],
+            &[diar("0", 0, 4000)],
+        );
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].language.as_deref(), Some(MIXED_LANGUAGE));
+        assert_eq!(segments[0].text, "நாம ship it");
+    }
+
+    #[test]
+    fn separate_turns_keep_their_own_languages() {
+        let segments = align(
+            &[tagged(0, 2000, "one", "ta"), tagged(2100, 4000, "two", "en")],
+            &[diar("0", 0, 2000), diar("1", 2100, 4000)],
+        );
+        assert_eq!(segments[0].language.as_deref(), Some("ta"));
+        assert_eq!(segments[1].language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn an_untagged_single_pass_transcript_gains_no_language() {
+        let segments = align(
+            &[stt(0, 2000, "one"), stt(2100, 4000, "two")],
+            &[diar("0", 0, 4000)],
+        );
+        assert_eq!(segments[0].language, None);
+    }
+
+    #[test]
+    fn merging_language_never_invents_or_loses_one() {
+        assert_eq!(merge_language(Some("ta"), Some("ta")).as_deref(), Some("ta"));
+        assert_eq!(
+            merge_language(Some("ta"), Some("en")).as_deref(),
+            Some(MIXED_LANGUAGE)
+        );
+        // An untagged fragment says nothing, so it overrides nothing.
+        assert_eq!(merge_language(Some("ta"), None).as_deref(), Some("ta"));
+        assert_eq!(merge_language(None, Some("en")).as_deref(), Some("en"));
+        assert_eq!(merge_language(None, None), None);
+        // Already mixed stays mixed rather than reverting to the newcomer.
+        assert_eq!(
+            merge_language(Some(MIXED_LANGUAGE), Some("en")).as_deref(),
+            Some(MIXED_LANGUAGE)
+        );
     }
 }

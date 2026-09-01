@@ -1,8 +1,10 @@
 pub mod align;
 pub mod audio_profile;
 pub mod chunk;
+pub mod codeswitch;
 pub mod denoise;
 pub mod diarization;
+pub mod http;
 pub mod llm;
 pub mod models;
 pub mod mom;
@@ -37,6 +39,8 @@ pub struct PipelineConfig {
     /// several speaker ids; larger collapses distinct voices into one.
     pub cluster_threshold: f32,
     pub generate_mom: bool,
+    /// "auto" | "code-switched" | an ISO code — see [`stt::SttLanguage`].
+    pub stt_language: String,
     pub mom_language: String,
     /// The ASR front-end chain (§11 audio preprocessing).
     pub preprocess: PreprocessOptions,
@@ -60,6 +64,7 @@ impl PipelineConfig {
             diarization_threads: settings.effective_diarization_threads(host),
             cluster_threshold: settings.cluster_threshold,
             generate_mom: settings.generate_mom,
+            stt_language: settings.stt_language.clone(),
             mom_language: settings.mom_language.clone(),
             preprocess: PreprocessOptions::from_settings(settings),
             denoise_enabled: settings.denoise_enabled,
@@ -133,6 +138,14 @@ pub struct RunMetrics {
     pub speech_ratio: Option<f32>,
     /// Length of the speech-only audio actually sent to STT, when trimming ran.
     pub stt_input_ms: Option<i64>,
+    /// Blocks whisper was handed in code-switched mode (§8). `None` for a
+    /// single pass — which is also what tells the benchmark harness which
+    /// mode produced a row.
+    pub stt_blocks: Option<usize>,
+    /// Languages actually detected across those blocks. More than one is the
+    /// pipeline having caught a code switch; exactly one on a meeting known to
+    /// be mixed is the signal that this needs looking at.
+    pub stt_languages: Vec<String>,
     /// Anything about this run a user should know: a skipped optional stage, a
     /// recording that is mostly silence. Never fatal (§33).
     pub warnings: Vec<String>,
@@ -182,8 +195,10 @@ pub fn run(
     metrics.preprocess_ms = stage_started.elapsed().as_millis() as u64;
 
     // VAD runs on the final preprocessed audio, before the expensive stages,
-    // so its speech ratio describes exactly what they will see.
-    let (stt_input, timeline) = run_vad(request, &processed, &mut metrics);
+    // so its speech ratio describes exactly what they will see — and, in
+    // code-switched mode, so STT knows where it can cut without clipping a
+    // word (§8).
+    let vad_outcome = run_vad(request, &processed, &mut metrics);
 
     // Diarization always sees the *whole* recording: it is what puts speakers
     // on the original timeline, and trimming it would mean remapping twice.
@@ -194,12 +209,22 @@ pub fn run(
     write_json(&out_dir.join("diarization.json"), &diarization)?;
 
     on_stage("TRANSCRIBING", 35);
-    let (mut stt_segments, stt_metrics) =
-        stt::transcribe(request.paths, request.config, &stt_input)?;
-    metrics.stt = stt_metrics;
+    let outcome = stt::transcribe(&stt::SttRequest {
+        paths: request.paths,
+        config: request.config,
+        wav_path: &vad_outcome.stt_input,
+        speech: vad_outcome.speech.as_deref(),
+        data_dir: Some(request.data_dir),
+    })?;
+    let mut stt_segments = outcome.segments;
+    metrics.stt = outcome.metrics;
+    metrics.stt_blocks = outcome.blocks;
+    metrics.stt_languages = outcome.languages;
+    metrics.warnings.extend(outcome.warnings);
     // Back onto the original recording's timeline before anything downstream —
     // alignment, MoM evidence links and click-to-play all assume it.
-    if let Some(timeline) = timeline.as_ref() {
+    // (Code-switched mode has already done its own, per-block, mapping.)
+    if let Some(timeline) = vad_outcome.timeline.as_ref() {
         timeline.remap_stt(&mut stt_segments);
     }
     write_json(&out_dir.join("stt.json"), &stt_segments)?;
@@ -307,23 +332,31 @@ fn run_front_end(
     }
 }
 
+/// What the VAD stage leaves for STT to work with.
+struct VadOutcome {
+    /// The WAV to transcribe: `processed.wav`, or the speech-only copy.
+    stt_input: std::path::PathBuf,
+    /// Set only when `stt_input` is a trimmed file — the mapping back to the
+    /// original recording's timeline.
+    timeline: Option<vad::Timeline>,
+    /// Speech regions on `stt_input`'s timeline, for code-switched blocking.
+    speech: Option<Vec<vad::SpeechSegment>>,
+}
+
 /// Measures how much of the recording is speech and, when the user has asked
 /// for it, writes the speech-only audio STT will read.
-///
-/// Returns the WAV to transcribe and, when it is a trimmed one, the timeline
-/// that maps its timestamps back to the original recording.
-fn run_vad(
-    request: &RunRequest,
-    processed: &Path,
-    metrics: &mut RunMetrics,
-) -> (std::path::PathBuf, Option<vad::Timeline>) {
-    let untrimmed = (processed.to_path_buf(), None);
+fn run_vad(request: &RunRequest, processed: &Path, metrics: &mut RunMetrics) -> VadOutcome {
+    let untrimmed = || VadOutcome {
+        stt_input: processed.to_path_buf(),
+        timeline: None,
+        speech: None,
+    };
     if !request.config.vad_enabled {
-        return untrimmed;
+        return untrimmed();
     }
     if !vad::is_available(request.data_dir) {
         eprintln!("[pipeline] skipping voice activity detection: model not installed");
-        return untrimmed;
+        return untrimmed();
     }
 
     let scratch = request.out_dir.join("vad_scratch.wav");
@@ -342,7 +375,7 @@ fn run_vad(
             metrics
                 .warnings
                 .push(format!("Voice activity detection was skipped: {error}"));
-            return untrimmed;
+            return untrimmed();
         }
     };
 
@@ -352,20 +385,41 @@ fn run_vad(
     }
     let _ = write_json(&request.out_dir.join("vad.json"), &report);
 
-    if !request.config.vad_trim_silence {
-        return untrimmed;
+    let untrimmed_with_speech = VadOutcome {
+        stt_input: processed.to_path_buf(),
+        timeline: None,
+        speech: Some(report.segments.clone()),
+    };
+
+    // Code-switched STT already skips the silence between its blocks, and it
+    // needs the speech segments to line up with the audio it cuts. Trimming
+    // first would give it segments on one timeline and samples on another, so
+    // the two features are mutually exclusive and blocking wins: it gets the
+    // same speed benefit without `vad::Timeline`'s stretched-interior caveat.
+    let code_switched = matches!(
+        stt::SttLanguage::parse(&request.config.stt_language),
+        stt::SttLanguage::CodeSwitched
+    );
+    if !request.config.vad_trim_silence || code_switched {
+        return untrimmed_with_speech;
     }
 
-    let speech = request.out_dir.join("speech.wav");
+    let speech_wav = request.out_dir.join("speech.wav");
     match vad::write_trimmed(
         processed,
-        &speech,
+        &speech_wav,
         &report.segments,
         request.config.vad_pad_ms,
     ) {
         Ok(timeline) => {
             metrics.stt_input_ms = Some(timeline.trimmed_duration_ms());
-            (speech, Some(timeline))
+            VadOutcome {
+                stt_input: speech_wav,
+                timeline: Some(timeline),
+                // Deliberately dropped: these are on the *original* timeline
+                // and the audio is not.
+                speech: None,
+            }
         }
         Err(error) => {
             // Transcribing the whole file is slower, never wrong. Silently
@@ -374,7 +428,7 @@ fn run_vad(
             metrics
                 .warnings
                 .push(format!("Silence trimming was skipped: {error}"));
-            untrimmed
+            untrimmed_with_speech
         }
     }
 }

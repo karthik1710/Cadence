@@ -1,21 +1,24 @@
 //! A deliberately tiny HTTP/1.1 client that only ever talks to `127.0.0.1`.
 //!
-//! **This is not a network dependency.** llama.cpp's local inference server is
-//! driven over a loopback socket — that is its IPC mechanism, the same way
-//! whisper.cpp and sherpa-onnx are driven over stdin/stdout. Nothing here can
-//! reach off the machine: [`request`] hard-codes the loopback address and
-//! takes a port, not a host or a URL, so there is no way to point it at a
+//! **This is not a network dependency.** llama.cpp's and whisper.cpp's local
+//! inference servers are driven over a loopback socket — that is their IPC
+//! mechanism, the same way sherpa-onnx is driven over stdin/stdout. Nothing
+//! here can reach off the machine: [`request`] hard-codes the loopback address
+//! and takes a port, not a host or a URL, so there is no way to point it at a
 //! remote service even by accident.
 //!
 //! It is written by hand rather than pulled from a crate for the same reason:
 //! adding `reqwest` (or any HTTP client) to the dependency graph would destroy
 //! the cheap structural check that Cadence has no cloud path in it —
-//! `cargo tree` showing no HTTP stack at all.
+//! `cargo tree` showing no HTTP stack at all. [`Multipart`] exists for the
+//! same reason: whisper-server takes audio as a `multipart/form-data` upload,
+//! and that format is a dozen lines of string building, not a crate.
 //!
-//! The alternative — re-running `llama-cli.exe` once per prompt — was
-//! rejected because MoM generation makes one call per transcript chunk (§14),
-//! and reloading multi-gigabyte weights for every chunk would dominate the
-//! §29 processing-time budget.
+//! The alternative — re-running `llama-cli.exe` / `whisper-cli.exe` once per
+//! prompt or per audio block — was rejected because MoM generation makes one
+//! call per transcript chunk (§14) and code-switched STT one call per ~30 s
+//! block (§8), and reloading the weights every time would dominate the §29
+//! processing-time budget.
 
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -35,16 +38,28 @@ impl Response {
     }
 }
 
-/// Sends one request to `127.0.0.1:<port>` and reads the whole response.
-///
-/// `Connection: close` is sent so the server ends the body by closing the
-/// socket, which keeps the reader simple and correct for both
-/// `Content-Length` and chunked responses.
+/// Sends one JSON (or bodiless) request to `127.0.0.1:<port>`.
 pub fn request(
     port: u16,
     method: &str,
     path: &str,
     body: Option<&str>,
+    read_timeout: Duration,
+) -> Result<Response, String> {
+    let body = body.map(|payload| ("application/json", payload.as_bytes()));
+    request_bytes(port, method, path, body, read_timeout)
+}
+
+/// Sends one request to `127.0.0.1:<port>` and reads the whole response.
+///
+/// `Connection: close` is sent so the server ends the body by closing the
+/// socket, which keeps the reader simple and correct for both
+/// `Content-Length` and chunked responses.
+pub fn request_bytes(
+    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<(&str, &[u8])>,
     read_timeout: Duration,
 ) -> Result<Response, String> {
     let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
@@ -61,8 +76,8 @@ pub fn request(
     let mut head = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAccept: application/json\r\nConnection: close\r\n"
     );
-    if let Some(payload) = body {
-        head.push_str("Content-Type: application/json\r\n");
+    if let Some((content_type, payload)) = body {
+        head.push_str(&format!("Content-Type: {content_type}\r\n"));
         head.push_str(&format!("Content-Length: {}\r\n", payload.len()));
     }
     head.push_str("\r\n");
@@ -70,9 +85,9 @@ pub fn request(
     stream
         .write_all(head.as_bytes())
         .map_err(|e| format!("failed writing request to the local model server: {e}"))?;
-    if let Some(payload) = body {
+    if let Some((_, payload)) = body {
         stream
-            .write_all(payload.as_bytes())
+            .write_all(payload)
             .map_err(|e| format!("failed writing request body to the local model server: {e}"))?;
     }
     stream.flush().map_err(|e| e.to_string())?;
@@ -161,6 +176,62 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
+/// A `multipart/form-data` body, the only shape whisper-server's `/inference`
+/// endpoint accepts audio in.
+///
+/// A boundary is only unsafe if the body contains it. The field values here
+/// are literals this crate wrote (a thread count, an ISO language code), and
+/// the file part is 16-bit PCM, so the odds of these 27 ASCII bytes appearing
+/// are ~2^-216 per offset — which is why the boundary is a constant rather
+/// than something this module has to generate and thread around.
+pub struct Multipart {
+    body: Vec<u8>,
+}
+
+const BOUNDARY: &str = "----CadenceLoopbackBoundary";
+
+impl Multipart {
+    pub fn new() -> Self {
+        Self { body: Vec::new() }
+    }
+
+    pub fn field(&mut self, name: &str, value: &str) {
+        self.body.extend_from_slice(
+            format!("--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n")
+                .as_bytes(),
+        );
+        self.body.extend_from_slice(value.as_bytes());
+        self.body.extend_from_slice(b"\r\n");
+    }
+
+    pub fn file(&mut self, name: &str, file_name: &str, content_type: &str, bytes: &[u8]) {
+        self.body.extend_from_slice(
+            format!(
+                "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{file_name}\"\r\nContent-Type: {content_type}\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        self.body.extend_from_slice(bytes);
+        self.body.extend_from_slice(b"\r\n");
+    }
+
+    /// The content type to send and the finished body.
+    pub fn finish(mut self) -> (String, Vec<u8>) {
+        self.body
+            .extend_from_slice(format!("--{BOUNDARY}--\r\n").as_bytes());
+        (
+            format!("multipart/form-data; boundary={BOUNDARY}"),
+            self.body,
+        )
+    }
+}
+
+impl Default for Multipart {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Reserves a free loopback port by binding and immediately releasing it.
 ///
 /// There is a small race between release and the server binding it; on a
@@ -217,5 +288,24 @@ mod tests {
     fn allocates_a_usable_port() {
         let port = free_local_port().unwrap();
         assert!(port > 0);
+    }
+
+    #[test]
+    fn builds_a_multipart_body_a_server_can_split() {
+        let mut form = Multipart::new();
+        form.field("language", "auto");
+        form.file("file", "block.wav", "audio/wav", &[0x52, 0x49, 0x46, 0x46]);
+        let (content_type, body) = form.finish();
+
+        assert!(content_type.starts_with("multipart/form-data; boundary="));
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("name=\"language\"\r\n\r\nauto\r\n"));
+        assert!(text.contains("filename=\"block.wav\""));
+        assert!(text.contains("Content-Type: audio/wav"));
+        // Two parts and the closing delimiter.
+        assert_eq!(text.matches(BOUNDARY).count(), 3);
+        assert!(text.ends_with("--\r\n"));
+        // The raw bytes survive verbatim — a WAV must not be re-encoded.
+        assert!(find_subslice(&body, b"RIFF").is_some());
     }
 }

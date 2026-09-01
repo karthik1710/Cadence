@@ -574,6 +574,7 @@ mod tests {
                     start_ms: i as i64 * 10_000,
                     end_ms: i as i64 * 10_000 + 8_000,
                     text: format!("turn {i} of a meeting about the release schedule"),
+                    language: None,
                 })
                 .collect(),
         }

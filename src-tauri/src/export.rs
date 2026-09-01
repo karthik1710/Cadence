@@ -308,6 +308,7 @@ mod tests {
                     end_ms: 145_000,
                     text: "இந்த feature ready ஆச்சா? We need to test it before Friday."
                         .to_string(),
+                    language: Some("mixed".to_string()),
                 },
                 TranscriptSegment {
                     speaker: "SPEAKER_01".to_string(),
@@ -315,6 +316,7 @@ mod tests {
                     start_ms: 145_000,
                     end_ms: 152_000,
                     text: "Yes, testing இன்னும் pending இருக்கு.".to_string(),
+                    language: Some("mixed".to_string()),
                 },
             ],
         }

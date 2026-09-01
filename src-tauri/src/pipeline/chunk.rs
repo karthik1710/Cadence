@@ -148,6 +148,7 @@ mod tests {
             start_ms: start_s * 1000,
             end_ms: start_s * 1000 + 4000,
             text: text.to_string(),
+            language: None,
         }
     }
 

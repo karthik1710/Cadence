@@ -109,6 +109,14 @@ impl ModelPaths {
         self.bin_dir.join("whisper-cli.exe")
     }
 
+    /// Ships in the same whisper.cpp release as `whisper-cli.exe`, and is what
+    /// code-switched STT (§8) drives so the weights are loaded once instead of
+    /// once per block. Not in `missing()`: an install without it falls back to
+    /// a single `whisper-cli.exe` pass rather than refusing to process.
+    pub fn whisper_server(&self) -> PathBuf {
+        self.bin_dir.join("whisper-server.exe")
+    }
+
     pub fn llama_server(&self) -> PathBuf {
         self.bin_dir.join("llama-server.exe")
     }

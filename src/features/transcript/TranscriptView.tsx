@@ -142,6 +142,14 @@ export function TranscriptView({
               {timecode(segment.start_ms)}
             </button>
             <span className="speaker">{displayName(segment)}</span>
+            {/* Only present when transcribed in code-switched mode (§8) — it
+                shows the pipeline noticed the switch, without cluttering a
+                transcript people read end to end. */}
+            {segment.language && (
+              <span className="lang-tag" title={`Detected language: ${segment.language}`}>
+                {segment.language}
+              </span>
+            )}
             <span className="transcript-text">
               {splitOnMatch(segment.text, query).map((part, i) =>
                 part.match ? <mark key={i}>{part.text}</mark> : <span key={i}>{part.text}</span>,

@@ -588,12 +588,14 @@ not a segment
                     end_ms: 400,
                     text: "first".to_string(),
                 }],
+                language: None,
             },
             SttSegment {
                 start_ms: 1_000,
                 end_ms: 2_500,
                 text: "second".to_string(),
                 words: Vec::new(),
+                language: None,
             },
         ];
         t.remap_stt(&mut segments);
@@ -614,6 +616,7 @@ not a segment
             end_ms: 20,
             text: "x".to_string(),
             words: Vec::new(),
+            language: None,
         }];
         Timeline::identity(SR).remap_stt(&mut segments);
         assert_eq!(segments[0].start_ms, 10);

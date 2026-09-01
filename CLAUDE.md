@@ -12,6 +12,28 @@ Hard constraints: **no cloud STT, no cloud LLM, no external AI APIs, no telemetr
 
 Rust unit tests exist under `src-tauri/src/pipeline/` (`cargo test`). There is no frontend test suite.
 
+## How to work in this repo
+
+**Delegate multi-file work to subagents by default.** Anything that touches more
+than a couple of files — a feature spanning Rust and the UI, a redesign, a docs
+sweep, a cross-cutting refactor — goes to the Agent tool with a self-contained
+prompt (file list, constraints, and the verification commands it must run),
+rather than being edited file-by-file in the main thread. Reserve direct edits
+for genuinely small, single-file changes.
+
+Two rules that matter when doing this, both learned the hard way here:
+
+* **Give each concurrent agent a disjoint file list.** Two agents editing
+  `Cargo.toml`/`lib.rs` at once cost a broken build and a killed dev server. If
+  a second agent needs a file the first owns, either sequence them or tell the
+  second to define its code and hand back the wiring (a `#[tauri::command]`
+  compiles fine before it is registered).
+* **Verify their work yourself; do not take the report on trust.** Re-run
+  `cargo build && cargo test` and `npx tsc --noEmit && npm run build` after an
+  agent lands. An agent has reported "tests pass" here while two were failing,
+  and another left nine dead-code warnings behind because it could not finish
+  its own wiring.
+
 ## Commands
 
 ### Windows client (repo root)

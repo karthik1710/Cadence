@@ -7,7 +7,7 @@
 //! Markdown tables ready to paste into `docs/model-benchmark.md`.
 //!
 //! ```text
-//! cargo run --release --bin bench_cli -- stt <audio.wav> [--models a,b] [--threads 4,8,24]
+//! cargo run --release --bin bench_cli -- stt <audio.wav> [--models a,b] [--threads 4,8,24] [--languages auto,code-switched]
 //! cargo run --release --bin bench_cli -- diarize <audio.wav> [--thresholds 0.5,0.7,0.8]
 //! cargo run --release --bin bench_cli -- llm <transcript.json> [--models qwen3-4b-q4,qwen3-8b-q4]
 //! cargo run --release --bin bench_cli -- full <audio.wav>
@@ -33,7 +33,7 @@ fn main() {
     }
 }
 
-const USAGE: &str = "usage: bench_cli <stt|diarize|llm|full> <input> [--models a,b] [--threads 4,8] [--thresholds 0.5,0.8]";
+const USAGE: &str = "usage: bench_cli <stt|diarize|llm|full> <input> [--models a,b] [--threads 4,8] [--thresholds 0.5,0.8] [--languages auto,code-switched,ta]";
 
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
@@ -46,6 +46,7 @@ fn run() -> Result<(), String> {
     let mut models: Vec<String> = Vec::new();
     let mut threads: Vec<usize> = Vec::new();
     let mut thresholds: Vec<f32> = Vec::new();
+    let mut languages: Vec<String> = Vec::new();
     while let Some(flag) = args.next() {
         let value = args.next().ok_or(format!("{flag} needs a value"))?;
         match flag.as_str() {
@@ -55,6 +56,9 @@ fn run() -> Result<(), String> {
                     .split(',')
                     .filter_map(|s| s.trim().parse().ok())
                     .collect()
+            }
+            "--languages" => {
+                languages = value.split(',').map(|s| s.trim().to_string()).collect()
             }
             "--thresholds" => {
                 thresholds = value
@@ -76,7 +80,7 @@ fn run() -> Result<(), String> {
     );
 
     match mode.as_str() {
-        "stt" => bench_stt(&input, &models, &threads, &host),
+        "stt" => bench_stt(&input, &models, &threads, &languages, &host),
         "diarize" => bench_diarize(&input, &thresholds, &threads, &host),
         "llm" => bench_llm(&input, &models, &host),
         "full" => bench_full(&input, &host),
@@ -105,6 +109,7 @@ fn bench_stt(
     input: &Path,
     models: &[String],
     threads: &[usize],
+    languages: &[String],
     host: &HostInfo,
 ) -> Result<(), String> {
     let models = if models.is_empty() {
@@ -121,54 +126,86 @@ fn bench_stt(
     } else {
         threads.to_vec()
     };
+    let languages = if languages.is_empty() {
+        vec!["auto".to_string()]
+    } else {
+        languages.to_vec()
+    };
 
     let dir = work_dir("stt")?;
     let audio = prepared_audio(input, &dir)?;
     let audio_secs = wav_seconds(&audio);
+    let data_dir = pipeline::paths::default_data_dir()?;
+    // Code-switched mode places its block boundaries in silence, so it needs
+    // the same VAD pass the real pipeline runs (§8).
+    let speech = detected_speech(&data_dir, &dir, &audio, host);
 
     println!("## STT (Phase 2) — {}\n", input.display());
-    println!("| model | threads | wall | realtime | peak RAM | segments | characters |");
-    println!("|---|---|---|---|---|---|---|");
+    println!("| model | language | threads | wall | realtime | peak RAM | blocks | detected | segments | characters |");
+    println!("|---|---|---|---|---|---|---|---|---|---|");
 
     for model in &models {
-        for &thread_count in &threads {
-            let settings = Settings {
-                stt_model: Some(model.clone()),
-                stt_threads: Some(thread_count),
-                generate_mom: false,
-                ..Settings::default()
-            };
-            let data_dir = pipeline::paths::default_data_dir()?;
-            let paths = match ModelPaths::from_data_dir(&data_dir, &settings) {
-                Ok(paths) => paths,
-                Err(err) => {
-                    println!("| {model} | {thread_count} | _not installed_ | | | | |");
-                    eprintln!("  skipping {model}: {err}");
-                    continue;
-                }
-            };
-            let config = PipelineConfig::from_settings(&settings, host);
+        for language in &languages {
+            for &thread_count in &threads {
+                let settings = Settings {
+                    stt_model: Some(model.clone()),
+                    stt_threads: Some(thread_count),
+                    stt_language: language.clone(),
+                    generate_mom: false,
+                    ..Settings::default()
+                };
+                let paths = match ModelPaths::from_data_dir(&data_dir, &settings) {
+                    Ok(paths) => paths,
+                    Err(err) => {
+                        println!("| {model} | {language} | {thread_count} | _not installed_ | | | | | | |");
+                        eprintln!("  skipping {model}: {err}");
+                        continue;
+                    }
+                };
+                let config = PipelineConfig::from_settings(&settings, host);
 
-            match stt::transcribe(&paths, &config, &audio) {
-                Ok((segments, metrics)) => {
-                    let characters: usize = segments.iter().map(|s| s.text.chars().count()).sum();
-                    println!(
-                        "| {model} | {thread_count} | {:.1}s | {:.2}x | {} | {} | {} |",
-                        metrics.wall_ms as f64 / 1000.0,
-                        realtime(metrics.wall_ms, audio_secs),
-                        ram(metrics.peak_ram_mb),
-                        segments.len(),
-                        characters
-                    );
-                    // The transcript itself is what accuracy is judged on;
-                    // WER needs a reference, which only a human can supply.
-                    let out = dir.join(format!("{model}-{thread_count}.json"));
-                    let _ = std::fs::write(
-                        &out,
-                        serde_json::to_string_pretty(&segments).unwrap_or_default(),
-                    );
+                match stt::transcribe(&stt::SttRequest {
+                    paths: &paths,
+                    config: &config,
+                    wav_path: &audio,
+                    speech: speech.as_deref(),
+                    data_dir: Some(&data_dir),
+                }) {
+                    Ok(outcome) => {
+                        let characters: usize =
+                            outcome.segments.iter().map(|s| s.text.chars().count()).sum();
+                        println!(
+                            "| {model} | {language} | {thread_count} | {:.1}s | {:.2}x | {} | {} | {} | {} | {} |",
+                            outcome.metrics.wall_ms as f64 / 1000.0,
+                            realtime(outcome.metrics.wall_ms, audio_secs),
+                            ram(outcome.metrics.peak_ram_mb),
+                            outcome
+                                .blocks
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|| "single pass".to_string()),
+                            if outcome.languages.is_empty() {
+                                "—".to_string()
+                            } else {
+                                outcome.languages.join(" ")
+                            },
+                            outcome.segments.len(),
+                            characters
+                        );
+                        for warning in &outcome.warnings {
+                            eprintln!("  warning: {warning}");
+                        }
+                        // The transcript itself is what accuracy is judged on;
+                        // WER needs a reference, which only a human can supply.
+                        let out = dir.join(format!("{model}-{language}-{thread_count}.json"));
+                        let _ = std::fs::write(
+                            &out,
+                            serde_json::to_string_pretty(&outcome.segments).unwrap_or_default(),
+                        );
+                    }
+                    Err(err) => {
+                        println!("| {model} | {language} | {thread_count} | _failed_ | | | | | | {err} |")
+                    }
                 }
-                Err(err) => println!("| {model} | {thread_count} | _failed_ | | | | {err} |"),
             }
         }
     }
@@ -178,6 +215,29 @@ fn bench_stt(
         dir.display()
     );
     Ok(())
+}
+
+/// Runs the VAD stage the way the pipeline does, so `--languages
+/// code-switched` benchmarks the same thing the app would do. `None` when the
+/// optional VAD model is not installed — the block path then reports why it
+/// fell back rather than pretending it ran.
+fn detected_speech(
+    data_dir: &Path,
+    work: &Path,
+    audio: &Path,
+    host: &HostInfo,
+) -> Option<Vec<pipeline::vad::SpeechSegment>> {
+    if !pipeline::vad::is_available(data_dir) {
+        return None;
+    }
+    let threads = Settings::default().effective_diarization_threads(host);
+    match pipeline::vad::detect(data_dir, threads, audio, &work.join("vad_scratch.wav")) {
+        Ok((report, _)) => Some(report.segments),
+        Err(err) => {
+            eprintln!("  voice activity detection failed: {err}");
+            None
+        }
+    }
 }
 
 // ----------------------------------------------------- Phase 3: diarization

@@ -1,4 +1,4 @@
-//! Minutes-of-meeting generation (master prompt §14-§18).
+//! Minutes-of-meeting generation.
 //!
 //! ```text
 //! transcript → speaker-aware chunks → per-chunk extraction →
@@ -7,7 +7,7 @@
 //! ```
 //!
 //! The design point that matters: **nothing the model writes is trusted as-is.**
-//! Its JSON is validated against the schema and repaired if malformed (§16),
+//! Its JSON is validated against the schema and repaired if malformed,
 //! and then [`ground`] rewrites the parts it is not allowed to invent —
 //! participants come from the transcript, timestamps outside the meeting are
 //! dropped rather than kept, and an owner who never spoke becomes `null`.
@@ -43,7 +43,7 @@ pub struct MomRequest<'a> {
     pub data_dir: Option<&'a Path>,
 }
 
-/// Runs the full MoM pipeline. `on_progress` receives a §12 stage name and a
+/// Runs the full MoM pipeline. `on_progress` receives a stage name and a
 /// rough percentage.
 pub fn generate(
     llm: &dyn LlmProvider,
@@ -84,7 +84,7 @@ pub fn generate(
         match extract_chunk(llm, &prompt, max_tokens, request, chunk) {
             Ok(extraction) => extractions.push(extraction),
             Err(err) => {
-                // One unreadable chunk must not cost the whole meeting (§33).
+                // One unreadable chunk must not cost the whole meeting.
                 // It is reported, and the rest of the minutes still get made.
                 failed_chunks += 1;
                 eprintln!("[mom] chunk {} could not be extracted: {err}", chunk.index);
@@ -111,7 +111,7 @@ The transcript itself is saved and unaffected.",
     let speakers = request.transcript.speaker_labels();
 
     // A long meeting can produce more extracted facts than fit one synthesis
-    // call. Condense them in batches until they do (§18's hierarchical step),
+    // call. Condense them in batches until they do (the hierarchical step),
     // with a bounded number of rounds so this always terminates.
     let mut facts = serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())?;
     let mut rounds = 0;
@@ -184,7 +184,7 @@ fn extract_chunk(
     match parse_extraction(&raw) {
         Ok(extraction) => Ok(extraction),
         Err(first_error) => {
-            // §16: invalid JSON is repaired and retried, never accepted.
+            // invalid JSON is repaired and retried, never accepted.
             let repaired = repair(
                 llm,
                 request.data_dir,
@@ -287,7 +287,7 @@ fn repair(
 
 /// Runs synthesis over batches of facts and folds the results back into the
 /// same shape, so an over-long meeting reduces in rounds instead of blowing
-/// the context window (§18).
+/// the context window.
 #[allow(clippy::too_many_arguments)]
 fn condense(
     llm: &dyn LlmProvider,
@@ -462,7 +462,7 @@ fn normalize(text: &str) -> String {
 }
 
 /// Rewrites every part of the minutes the model is not allowed to decide
-/// (§16). This runs after validation and is what makes the evidence in the UI
+///. This runs after validation and is what makes the evidence in the UI
 /// trustworthy: a timestamp shown next to a decision either points at a real
 /// moment in the recording or is absent.
 pub fn ground(mom: &mut Mom, transcript: &Transcript) {
@@ -527,7 +527,7 @@ fn normalize_timestamp(raw: Option<i64>, duration_ms: i64) -> Option<i64> {
 
 /// Matches a model-supplied speaker name against the transcript's real
 /// presentation labels. Anything else — a real name it guessed, a label from
-/// another meeting — becomes `None` (§7: V1 never identifies real people).
+/// another meeting — becomes `None` (V1 never identifies real people).
 fn match_label(name: &str, labels: &[String]) -> Option<String> {
     let candidate = name.trim();
     if candidate.is_empty() || candidate.eq_ignore_ascii_case("null") {

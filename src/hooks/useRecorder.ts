@@ -12,8 +12,8 @@ const CLIPPING_LEVEL = 0.98;
 const WARNING_SAMPLES = Math.round(4000 / LEVEL_POLL_MS);
 
 /**
- * Owns the recording half of the meeting state machine (§12) and the input
- * warnings §9 asks for: low input, clipping, and device disconnection.
+ * Owns the recording half of the meeting state machine and the input
+ * warnings this surfaces: low input, clipping, and device disconnection.
  */
 export function useRecorder() {
   const [state, setState] = useState<RecorderState>("idle");
@@ -81,7 +81,7 @@ export function useRecorder() {
       }
       try {
         const err = await api.takeRecordingError();
-        // A stream-level error means the device went away mid-meeting (§9).
+        // A stream-level error means the device went away mid-meeting.
         if (err) setDeviceError(err);
       } catch {
         // ignore

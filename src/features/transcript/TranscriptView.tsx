@@ -5,7 +5,7 @@ import { Notice } from "../../components/ui";
 
 interface Props {
   transcript: Transcript;
-  /** Stable speaker id → user-assigned name (§23, presentation only). */
+  /** Stable speaker id → user-assigned name (presentation only). */
   speakerNames: Record<string, string>;
   onSeek: (ms: number) => void;
   onRenameSpeaker: (speaker: string, name: string) => void;
@@ -142,7 +142,7 @@ export function TranscriptView({
               {timecode(segment.start_ms)}
             </button>
             <span className="speaker">{displayName(segment)}</span>
-            {/* Only present when transcribed in code-switched mode (§8) — it
+            {/* Only present when transcribed in code-switched mode — it
                 shows the pipeline noticed the switch, without cluttering a
                 transcript people read end to end. */}
             {segment.language && (

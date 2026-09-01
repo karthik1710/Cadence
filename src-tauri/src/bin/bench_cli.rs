@@ -1,10 +1,10 @@
-//! Benchmark harness for the model-selection phases (master prompt Phases 2,
+//! Benchmark harness for the model-selection phases (Phases 2,
 //! 3, 6 and 14).
 //!
-//! The master prompt forbids committing to an STT model, a diarization
-//! threshold, or an LLM before benchmarks exist (§39.3, §39.4). This is the
+//! Project rule: never commit to an STT model, a diarization
+//! threshold, or an LLM before benchmarks exist. This is the
 //! tool that produces them, on the machine that will run them, and prints
-//! Markdown tables ready to paste into `docs/model-benchmark.md`.
+//! Markdown tables ready to paste into `docs/benchmarks.md`.
 //!
 //! ```text
 //! cargo run --release --bin bench_cli -- stt <audio.wav> [--models a,b] [--threads 4,8,24] [--languages auto,code-switched]
@@ -137,7 +137,7 @@ fn bench_stt(
     let audio_secs = wav_seconds(&audio);
     let data_dir = pipeline::paths::default_data_dir()?;
     // Code-switched mode places its block boundaries in silence, so it needs
-    // the same VAD pass the real pipeline runs (§8).
+    // the same VAD pass the real pipeline runs.
     let speech = detected_speech(&data_dir, &dir, &audio, host);
 
     println!("## STT (Phase 2) — {}\n", input.display());
@@ -211,7 +211,7 @@ fn bench_stt(
     }
 
     println!(
-        "\nTranscripts written to {} — compare them by hand for accuracy, especially on Tamil and code-switched audio (§6, §8).",
+        "\nTranscripts written to {} — compare them by hand for accuracy, especially on Tamil and code-switched audio.",
         dir.display()
     );
     Ok(())
@@ -315,7 +315,7 @@ fn bench_diarize(
         }
     }
 
-    println!("\nCompare the speaker count against the real headcount for this recording (§7). A count far above it means the threshold is too low.");
+    println!("\nCompare the speaker count against the real headcount for this recording. A count far above it means the threshold is too low.");
     Ok(())
 }
 
@@ -420,10 +420,10 @@ fn bench_llm(transcript_path: &Path, models: &[String], host: &HostInfo) -> Resu
     }
 
     println!(
-        "\nMinutes written to {} — score them against §30 (factual accuracy, action items, decisions, Tamil handling, hallucination resistance) before choosing.",
+        "\nMinutes written to {} — score them against the rubric (factual accuracy, action items, decisions, Tamil handling, hallucination resistance) before choosing.",
         dir.display()
     );
-    println!("Any model whose peak RAM exceeds 15 GB is rejected outright (§4/§30).");
+    println!("Any model whose peak RAM exceeds 15 GB is rejected outright.");
     Ok(())
 }
 
@@ -478,7 +478,7 @@ fn bench_full(input: &Path, host: &HostInfo) -> Result<(), String> {
     );
     let budget = m.audio_ms as f64 * 0.167;
     println!(
-        "§29 target (10 min for a 60 min meeting) — {}",
+        "Processing-time target (10 min for a 60 min meeting) — {}",
         if (m.total_ms as f64) <= budget {
             "MET".to_string()
         } else {

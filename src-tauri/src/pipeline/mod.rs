@@ -25,12 +25,12 @@ use std::path::Path;
 use crate::settings::{self, Settings};
 use crate::system::HostInfo;
 
-/// Per-stage processing knobs, owned by the Settings screen (§27 "Processing
+/// Per-stage processing knobs, owned by the Settings screen ("Processing
 /// threads") and overridable by the benchmark runner.
 ///
 /// Both native CLIs default to far fewer threads than a modern laptop has —
 /// whisper.cpp to 4, sherpa-onnx to 1 — so leaving them alone costs most of
-/// the §29 processing-time budget.
+/// the processing-time budget.
 #[derive(Debug, Clone)]
 pub struct PipelineConfig {
     pub stt_threads: usize,
@@ -42,13 +42,13 @@ pub struct PipelineConfig {
     /// "auto" | "code-switched" | an ISO code — see [`stt::SttLanguage`].
     pub stt_language: String,
     pub mom_language: String,
-    /// The ASR front-end chain (§11 audio preprocessing).
+    /// The ASR front-end chain (audio preprocessing).
     pub preprocess: PreprocessOptions,
     /// Both of these depend on an *optional* model. Enabled here only means
     /// "run it if it is installed" — see `denoise::is_available`.
     pub denoise_enabled: bool,
     pub vad_enabled: bool,
-    /// Cut silence out of the audio sent to STT. Off by default (§29 vs the
+    /// Cut silence out of the audio sent to STT. Off by default (vs the
     /// timestamp-mapping risk documented in `pipeline::vad`).
     pub vad_trim_silence: bool,
     pub vad_pad_ms: i64,
@@ -90,7 +90,7 @@ pub struct RunRequest<'a> {
     pub config: &'a PipelineConfig,
     pub settings: &'a Settings,
     pub host: &'a HostInfo,
-    /// The untouched recording (§10 — never modified, never deleted).
+    /// The untouched recording (never modified, never deleted).
     pub input_wav: &'a Path,
     /// The meeting's own directory, where every artifact is written.
     pub out_dir: &'a Path,
@@ -104,12 +104,12 @@ pub struct PipelineOutcome {
     pub transcript: Transcript,
     pub mom: Option<Mom>,
     /// Set when the transcript succeeded but MoM generation did not. The
-    /// meeting is still usable; the UI offers a retry (§33).
+    /// meeting is still usable; the UI offers a retry.
     pub mom_error: Option<String>,
     pub metrics: RunMetrics,
 }
 
-/// Per-stage cost of one run (§29), written to `metrics.json` beside the
+/// Per-stage cost of one run, written to `metrics.json` beside the
 /// artifacts. This is what turns every real meeting into a data point for the
 /// performance budget instead of only the benchmark runs.
 /// `#[serde(default)]`: a `metrics.json` written before the audio-quality
@@ -138,7 +138,7 @@ pub struct RunMetrics {
     pub speech_ratio: Option<f32>,
     /// Length of the speech-only audio actually sent to STT, when trimming ran.
     pub stt_input_ms: Option<i64>,
-    /// Blocks whisper was handed in code-switched mode (§8). `None` for a
+    /// Blocks whisper was handed in code-switched mode. `None` for a
     /// single pass — which is also what tells the benchmark harness which
     /// mode produced a row.
     pub stt_blocks: Option<usize>,
@@ -147,12 +147,12 @@ pub struct RunMetrics {
     /// be mixed is the signal that this needs looking at.
     pub stt_languages: Vec<String>,
     /// Anything about this run a user should know: a skipped optional stage, a
-    /// recording that is mostly silence. Never fatal (§33).
+    /// recording that is mostly silence. Never fatal.
     pub warnings: Vec<String>,
 }
 
 impl RunMetrics {
-    /// Processing time as a multiple of the meeting's length. §29's budget is
+    /// Processing time as a multiple of the meeting's length. the budget is
     /// stated in these terms: a 60-minute meeting in 10 minutes is 0.17x.
     pub fn realtime_factor(&self) -> f64 {
         if self.audio_ms <= 0 {
@@ -162,14 +162,14 @@ impl RunMetrics {
     }
 }
 
-/// Runs the full local pipeline (master prompt §11): preprocess → diarize →
+/// Runs the full local pipeline: preprocess → diarize →
 /// STT → align → extract → synthesize. Every stage's raw output is written to
 /// `out_dir` before the next stage runs, so a later failure never costs the
-/// work already done (§33) — `original.wav` is never touched, and
+/// work already done — `original.wav` is never touched, and
 /// `diarization.json` / `stt.json` stay separate from the derived
 /// `transcript.json` and `mom.json`.
 ///
-/// `on_stage` receives the §12 state-machine stage name and a rough percentage.
+/// `on_stage` receives the state-machine stage name and a rough percentage.
 pub fn run(
     request: &RunRequest,
     on_stage: &dyn Fn(&str, i64),
@@ -197,7 +197,7 @@ pub fn run(
     // VAD runs on the final preprocessed audio, before the expensive stages,
     // so its speech ratio describes exactly what they will see — and, in
     // code-switched mode, so STT knows where it can cut without clipping a
-    // word (§8).
+    // word.
     let vad_outcome = run_vad(request, &processed, &mut metrics);
 
     // Diarization always sees the *whole* recording: it is what puts speakers
@@ -284,14 +284,14 @@ pub fn run(
 }
 
 /// Format conversion, optional denoising, then the gain stage — writing
-/// `processed.wav`. `original.wav` is only ever read (§10).
+/// `processed.wav`. `original.wav` is only ever read.
 ///
 /// The order matters: GTCRN is a 16 kHz model so it must run after the
 /// resample, and normalising before it would hand it a boosted noise floor to
 /// fight, so the gain stage is applied to the denoiser's output instead.
 ///
 /// Every failure below is a *skip*, not an error: the un-denoised audio it
-/// started from is perfectly usable, and §33 says a processing stage must
+/// started from is perfectly usable, and a processing stage must
 /// never cost a meeting.
 fn run_front_end(
     request: &RunRequest,
@@ -522,7 +522,7 @@ mod tests {
             total_ms: 600_000,
             ..RunMetrics::default()
         };
-        // §29's target: a 60-minute meeting processed in 10 minutes.
+        // the target: a 60-minute meeting processed in 10 minutes.
         assert!((metrics.realtime_factor() - 0.166).abs() < 0.01);
         assert_eq!(RunMetrics::default().realtime_factor(), 0.0);
     }

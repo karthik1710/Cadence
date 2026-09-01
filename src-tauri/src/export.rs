@@ -1,4 +1,4 @@
-//! Export (master prompt §26): Markdown and JSON in V1.
+//! Export: Markdown and JSON in V1.
 //!
 //! Exports are written into the meeting's own `exports/` directory rather than
 //! anywhere outside it, so everything about a meeting stays in one place and
@@ -183,7 +183,7 @@ pub fn render_markdown(
 }
 
 /// Presentation label → user-assigned name, for meetings where speakers were
-/// renamed (§23). Empty when there is no transcript to map ids to labels.
+/// renamed. Empty when there is no transcript to map ids to labels.
 fn label_renames(
     meta: &MeetingMetadata,
     transcript: Option<&Transcript>,

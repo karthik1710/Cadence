@@ -1,8 +1,8 @@
 //! Headless runner for the whole local pipeline: audio → preprocess →
-//! diarize → STT → align → minutes (master prompt Phase 5).
+//! diarize → STT → align → minutes (Phase 5).
 //!
 //! It exists so the AI path can be exercised and re-run on test recordings
-//! without the UI — which is also how the §29 benchmarks are collected.
+//! without the UI — which is also how the benchmarks are collected.
 //!
 //! ```text
 //! cargo run --bin pipeline_cli -- <audio.wav> [out-dir] [options]
@@ -12,7 +12,7 @@
 //!   --stt <model-id>    override the STT model (e.g. whisper-base)
 //!   --llm <model-id>    override the language model (e.g. qwen3-4b-q4)
 //!   --language <name>   output language for the minutes (default English)
-//!   --stt-language <m>  auto | code-switched | an ISO code (§8, default
+//!   --stt-language <m>  auto | code-switched | an ISO code (default
 //!                       code-switched)
 //! ```
 
@@ -169,7 +169,7 @@ fn run() -> Result<(), String> {
     );
 
     let m = &outcome.metrics;
-    println!("\nper stage (§29):");
+    println!("\nper stage:");
     println!("  preprocess:  {:>7.1}s", m.preprocess_ms as f64 / 1000.0);
     println!(
         "  diarization: {:>7.1}s  peak {}",
@@ -181,7 +181,7 @@ fn run() -> Result<(), String> {
         m.stt.wall_ms as f64 / 1000.0,
         ram(m.stt.peak_ram_mb),
         match m.stt_blocks {
-            // §8: how many blocks whisper saw, and what it detected in them —
+            // how many blocks whisper saw, and what it detected in them —
             // one language on a meeting known to be mixed is the thing to look
             // at, and it is invisible without this line.
             Some(blocks) => format!("{blocks} blocks, detected: {}", m.stt_languages.join(" ")),
@@ -207,7 +207,7 @@ fn run() -> Result<(), String> {
         (None, None) => println!("\nminutes: skipped"),
     }
 
-    // §33: a stage that could not run says so. Silently degraded output is the
+    // a stage that could not run says so. Silently degraded output is the
     // failure mode this project cares most about.
     if !m.warnings.is_empty() {
         println!("\nwarnings:");

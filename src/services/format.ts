@@ -35,7 +35,7 @@ export function sizeLabel(mb: number): string {
   return `${mb} MB`;
 }
 
-/** Highlights every occurrence of `needle`, for transcript search (§23). */
+/** Highlights every occurrence of `needle`, for transcript search. */
 export function splitOnMatch(
   text: string,
   needle: string,

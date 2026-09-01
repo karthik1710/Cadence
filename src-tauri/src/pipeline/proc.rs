@@ -1,6 +1,6 @@
 //! Running a native AI binary and measuring what it cost.
 //!
-//! Every stage of the pipeline shells out to a native tool, and §29 asks for
+//! Every stage of the pipeline shells out to a native tool, and the performance budget asks for
 //! wall time *and* peak RAM per stage. Both come from here, so no stage has to
 //! reimplement process handling — and so a stage's cost is measured on real
 //! runs, not only inside the benchmark harness.
@@ -11,7 +11,7 @@ use std::io::Read;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// What one stage cost (§29).
+/// What one stage cost.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct StageMetrics {
     pub wall_ms: u64,

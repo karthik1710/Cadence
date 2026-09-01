@@ -1,4 +1,4 @@
-//! Segment-wise transcription for code-switched meetings (master prompt §8).
+//! Segment-wise transcription for code-switched meetings.
 //!
 //! ## Why `--language auto` is not enough
 //!
@@ -23,7 +23,7 @@
 //! A block here is a single contiguous span of the recording — silence inside
 //! it is kept — so it has no splices and no interior to stretch. Mapping back
 //! is `block.start_ms + whatever whisper said`, exact by construction, which
-//! is what the transcript, the diarization alignment, the §15 evidence links
+//! is what the transcript, the diarization alignment, the evidence links
 //! and click-to-play all need. VAD is still what decides *where* the cuts
 //! fall, so a block boundary never lands in the middle of a word, and the
 //! silence between blocks is never sent to whisper at all.
@@ -152,7 +152,7 @@ fn normalize(speech: &[SpeechSegment]) -> Vec<SpeechSegment> {
 ///
 /// This is the one place a cut can land mid-word, and it is the lesser evil:
 /// the alternative is decoding a multi-minute monologue in a language read off
-/// its first few seconds, which is exactly what §8 forbids.
+/// its first few seconds, which is exactly what a mixed-language meeting breaks.
 fn split_overlong(segments: Vec<SpeechSegment>) -> Vec<SpeechSegment> {
     let mut out = Vec::with_capacity(segments.len());
     for segment in segments {
@@ -355,7 +355,7 @@ pub fn language_code(reported: &str) -> Option<String> {
 /// invocation costs ~2.5-3.1 s on this machine before it decodes anything
 /// (process start plus a 487 MB `small` model load, page cache warm). A
 /// 60-minute meeting is roughly 120 blocks, so per-block CLI invocations would
-/// spend ~5-6 minutes reloading weights — most of §29's 10-minute budget,
+/// spend ~5-6 minutes reloading weights — most of the 10-minute budget,
 /// before any transcription. The server pays that once.
 ///
 /// Same shape as [`crate::pipeline::llm::server::LlamaServer`]: loopback only,
@@ -386,7 +386,7 @@ impl WhisperServer {
         }
         // Truncated per run: a diagnostic tail, not an audit trail. whisper.cpp
         // prints transcribed text to its log at higher verbosities, so this
-        // must not accumulate meeting content (§34).
+        // must not accumulate meeting content.
         let log = std::fs::File::create(log_path)
             .map_err(|e| format!("could not open {}: {e}", log_path.display()))?;
         let log_err = log.try_clone().map_err(|e| e.to_string())?;
@@ -458,19 +458,19 @@ impl WhisperServer {
         form.file("file", "block.wav", "audio/wav", wav);
         // verbose_json is the only response format that carries both the
         // per-segment timestamps and the detected language — the two things
-        // §8 needs out of every block.
+        // code-switching needs out of every block.
         form.field("response_format", "verbose_json");
         // Per block, not per file: this is the entire point of the mode.
         form.field("language", "auto");
-        // Load-bearing, not tuning knobs (docs/models.md): without them
+        // Load-bearing, not tuning knobs (docs/benchmarks.md): without them
         // whisper.cpp has been observed to collapse a real ~13 s span of
         // speech into one short, wrong sentence.
         form.field("max_len", "80");
         form.field("split_on_word", "true");
         form.field("max_context", "0");
         form.field("temperature", "0.0");
-        // NOTE: `translate` is never sent, and must never be added here. §8
-        // requires the transcript to preserve the language actually spoken;
+        // NOTE: `translate` is never sent, and must never be added here. The transcript
+        // must preserve the language actually spoken;
         // translation is the MoM stage's job, controlled by `mom_language`,
         // and doing it here would destroy the original words for good.
         let (content_type, body) = form.finish();
@@ -546,7 +546,7 @@ pub struct BlockOutcome {
 /// enough to be one block) and the caller should make its single pass —
 /// that is not a failure and needs no warning. An `Err` is a real problem
 /// (no server binary, a block that would not decode) and the caller falls back
-/// to a single pass *and* says so: §33 forbids losing a meeting to a stage
+/// to a single pass *and* says so: never lose a meeting to a stage
 /// that could not run, and forbids doing it silently.
 pub fn transcribe(run: &BlockRun) -> Result<Option<BlockOutcome>, String> {
     let (samples, _, _) = preprocess::read_mono_16k(run.wav_path)?;

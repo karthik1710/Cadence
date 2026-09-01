@@ -1,7 +1,7 @@
 //! Host-hardware facts the pipeline has to adapt to, and the memory profile
 //! derived from them.
 //!
-//! Cadence's reference machine (master prompt §1) has 32 GB of RAM, but the
+//! Cadence's reference machine has 32 GB of RAM, but the
 //! app is expected to run on 16 GB laptops too. RAM is the constraint that
 //! actually decides which LLM can be loaded, so it is measured at runtime
 //! rather than assumed: see [`MemoryProfile::detect`].
@@ -29,11 +29,11 @@ impl HostInfo {
     }
 }
 
-/// Which class of machine we are on, and therefore how much of the §4 memory
+/// Which class of machine we are on, and therefore how much of the memory
 /// budget the LLM stage may spend.
 ///
-/// The tiers are deliberately coarse. The master prompt's hard limit is 15 GB
-/// of LLM process RAM with 10 GB preferred (§4), but that budget assumes the
+/// The tiers are deliberately coarse. The hard limit is 15 GB
+/// of LLM process RAM with 10 GB preferred, but that budget assumes the
 /// 32 GB reference laptop. On a 16 GB machine, Windows plus the app plus the
 /// page cache leave roughly 9-11 GB usable, and the LLM must also coexist with
 /// whatever the OS has already paged in — so the budget scales with the box
@@ -91,8 +91,8 @@ impl MemoryProfile {
     /// comfortable on 32 GB and uncomfortably close to the ceiling on 16 GB
     /// once Windows, the webview, and the OS file cache holding a 60-minute
     /// WAV are accounted for. The 4B at the same quantization is ~2.5 GB and
-    /// leaves real headroom. Neither is a permanent selection — §5 forbids
-    /// that before benchmarks — and both are user-overridable in Settings.
+    /// leaves real headroom. Neither is a permanent selection — nothing is settled
+    /// before benchmarks — and both are user-overridable in Settings.
     pub fn default_llm_model(self) -> &'static str {
         match self {
             MemoryProfile::High => "qwen3-8b-q4",
@@ -113,7 +113,7 @@ impl MemoryProfile {
     }
 
     /// llama.cpp context window. Bigger contexts cost KV-cache RAM roughly
-    /// linearly, and MoM generation is chunked (§14/§18) precisely so it never
+    /// linearly, and MoM generation is chunked precisely so it never
     /// needs a huge one.
     pub fn default_llm_context(self) -> usize {
         match self {
@@ -123,13 +123,13 @@ impl MemoryProfile {
         }
     }
 
-    /// Advisory ceiling on LLM process RAM, in MB (§4). Enforced as a
+    /// Advisory ceiling on LLM process RAM, in MB. Enforced as a
     /// pre-flight check in `pipeline::llm`, not as a hard allocator limit —
     /// llama.cpp does not take a memory cap, so the useful thing to do is
     /// refuse to start a model that clearly will not fit, and say why.
     pub fn llm_ram_budget_mb(self) -> u64 {
         match self {
-            // §4 prefers <= 10 GB even where 15 GB is allowed.
+            // The budget prefers <= 10 GB even where 15 GB is allowed.
             MemoryProfile::High => 10_000,
             MemoryProfile::Balanced => 6_000,
             MemoryProfile::Low => 3_500,
@@ -186,12 +186,12 @@ fn physical_memory_mb() -> (u64, u64) {
 
 #[cfg(not(windows))]
 fn physical_memory_mb() -> (u64, u64) {
-    // Cadence ships on Windows only (§35); this branch exists so the crate's
+    // Cadence ships on Windows only; this branch exists so the crate's
     // unit tests can run anywhere.
     (32_768, 16_384)
 }
 
-/// Peak working set of a spawned child process, in MB — the §29 "peak RAM"
+/// Peak working set of a spawned child process, in MB — the "peak RAM"
 /// measurement for whisper.cpp / sherpa-onnx / llama.cpp. Returns `None` if
 /// the query fails.
 #[cfg(windows)]
@@ -272,7 +272,7 @@ mod tests {
             MemoryProfile::Balanced,
             MemoryProfile::High,
         ] {
-            assert!(p.llm_ram_budget_mb() <= 15_000, "§4 hard limit");
+            assert!(p.llm_ram_budget_mb() <= 15_000, "15 GB hard limit");
         }
     }
 

@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 /// Resolves where the local AI binaries/models live: `<app_data_dir>/models/...`,
-/// the layout the in-app Model Manager (`models_manager.rs`, master prompt §27)
+/// the layout the in-app Model Manager (`models_manager.rs`)
 /// and `scripts/setup-models.ps1` both provision.
 ///
 /// Which STT/LLM weights those are is not fixed: it comes from the user's
 /// settings, which in turn default to the machine's memory profile. A 16 GB
 /// laptop resolves to a different LLM than the 32 GB reference machine without
-/// anything else in the pipeline knowing or caring (§5's swappable-provider
+/// anything else in the pipeline knowing or caring (the swappable-provider
 /// requirement).
 pub struct ModelPaths {
     bin_dir: PathBuf,
@@ -29,7 +29,7 @@ pub fn models_dir(data_dir: &Path) -> PathBuf {
 
 impl ModelPaths {
     /// Resolves paths and confirms every required file is present — missing
-    /// models are a clear, recoverable error (§33), never a crash.
+    /// models are a clear, recoverable error, never a crash.
     pub fn resolve(app: &AppHandle, settings: &Settings) -> Result<Self, String> {
         let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
         Self::from_data_dir(&data_dir, settings)
@@ -110,7 +110,7 @@ impl ModelPaths {
     }
 
     /// Ships in the same whisper.cpp release as `whisper-cli.exe`, and is what
-    /// code-switched STT (§8) drives so the weights are loaded once instead of
+    /// code-switched STT drives so the weights are loaded once instead of
     /// once per block. Not in `missing()`: an install without it falls back to
     /// a single `whisper-cli.exe` pass rather than refusing to process.
     pub fn whisper_server(&self) -> PathBuf {
@@ -144,7 +144,7 @@ fn installed(models_dir: &Path, id: &str) -> bool {
 }
 
 /// Catalog entry backing the currently selected LLM, for the pre-flight memory
-/// check and for recording provenance in `mom.json` (§17).
+/// check and for recording provenance in `mom.json`.
 pub fn selected_llm_entry(settings: &Settings) -> Option<&'static models_manager::CatalogEntry> {
     let entry = models_manager::entry(&settings.effective_llm_model())?;
     matches!(entry.kind, ModelKind::Llm).then_some(entry)

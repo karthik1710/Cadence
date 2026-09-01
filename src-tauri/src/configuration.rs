@@ -1,4 +1,4 @@
-//! Tauri commands for Settings and the Model Manager (master prompt §27).
+//! Tauri commands for Settings and the Model Manager.
 //!
 //! This is where the machine-awareness surfaces to the user: `get_host_info`
 //! reports what Cadence detected and which profile it chose, and everything
@@ -95,7 +95,7 @@ pub fn list_models(app: AppHandle) -> Result<Vec<ModelStatus>, String> {
 
 /// Everything the app needs before it can process a meeting offline. Called on
 /// startup so a missing model is discovered *before* a meeting is recorded,
-/// never after (§33).
+/// never after.
 #[tauri::command]
 pub fn check_models(app: AppHandle) -> Result<SetupStatus, String> {
     let data_dir = app_data_dir(&app)?;

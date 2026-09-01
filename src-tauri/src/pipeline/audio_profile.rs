@@ -1,6 +1,6 @@
 //! Measuring how good a recording actually is, in terms a user can act on.
 //!
-//! §10 keeps `original.wav` untouched, which means the only lever a user has
+//! The raw-artifact rule keeps `original.wav` untouched, which means the only lever a user has
 //! over audio quality is the room and the microphone — and they only get that
 //! lever if someone tells them, in plain words, what is wrong. Everything here
 //! is pure analysis: it reads samples and produces numbers plus advice, and
@@ -281,7 +281,7 @@ fn read_normalised(
     }
 }
 
-/// Profiles a meeting's untouched recording (§10). `data_dir` is the app data
+/// Profiles a meeting's untouched recording. `data_dir` is the app data
 /// directory; the recording is `meetings/<id>/original.wav`.
 pub fn profile_meeting(data_dir: &Path, meeting_id: &str) -> Result<AudioProfile, String> {
     let wav = data_dir

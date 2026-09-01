@@ -9,7 +9,7 @@ use std::process::Command;
 /// stdout, which prints one line per segment in the form
 /// `"<start_sec> -- <end_sec> speaker_<NN>"` (see
 /// `OfflineSpeakerDiarizationSegment::ToString()` in sherpa-onnx). Speaker
-/// count is left to sherpa-onnx's automatic clustering — master prompt §7
+/// count is left to sherpa-onnx's automatic clustering —
 /// doesn't require the organizer to know the exact headcount up front.
 pub fn diarize(
     paths: &ModelPaths,

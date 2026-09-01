@@ -19,11 +19,11 @@ interface Props {
 const DEFAULT_DEVICE = "__default__";
 
 /**
- * The §22 main screen: start a meeting, watch it record, watch it process.
+ * The main screen: start a meeting, watch it record, watch it process.
  *
  * The meeting row is created *before* the first sample is captured, so the
  * audio always has a folder to land in and no failure after that point can
- * leave a recording without a meeting to recover it from (§33).
+ * leave a recording without a meeting to recover it from.
  */
 export function RecordingPanel({
   onOpenMeeting,

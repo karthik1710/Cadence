@@ -5,7 +5,7 @@ import type { MeetingStatus } from "../types";
 const POLL_MS = 1000;
 
 /**
- * Polls the local pipeline's status for one meeting (§12) and stops as soon as
+ * Polls the local pipeline's status for one meeting and stops as soon as
  * it settles. `onSettled` fires once per completed or failed run, which is
  * where the caller reloads the transcript and minutes.
  */

@@ -1,4 +1,4 @@
-//! Persisted user settings (master prompt §27) and the machine-aware defaults
+//! Persisted user settings and the machine-aware defaults
 //! behind them.
 //!
 //! Everything here is a *preference*: each field is optional, and leaving it
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// Windows input device name; `None` means the system default (§9).
+    /// Windows input device name; `None` means the system default.
     pub input_device: Option<String>,
     /// "auto" (detect from RAM), or a forced "low" / "balanced" / "high".
     pub profile: String,
@@ -29,18 +29,18 @@ pub struct Settings {
     pub cluster_threshold: f32,
     /// llama.cpp context window; `None` means the profile's default.
     pub llm_context_tokens: Option<usize>,
-    /// How STT is told to handle language (§8). `"auto"`, `"code-switched"`,
+    /// How STT is told to handle language. `"auto"`, `"code-switched"`,
     /// or an explicit ISO code — see [`crate::pipeline::stt::SttLanguage`].
     pub stt_language: String,
-    /// Output language for generated minutes (§8 — the transcript itself is
+    /// Output language for generated minutes (the transcript itself is
     /// never translated, only the MoM).
     pub mom_language: String,
     /// Lets a user turn off the LLM stage entirely — useful on a machine that
     /// cannot host one, and the transcript is still produced.
     pub generate_mom: bool,
-    /// §34: off by default, because deeper logging touches meeting content.
+    /// off by default, because deeper logging touches meeting content.
     pub debug_logging: bool,
-    // --- Audio front-end (§10, §11). Each step is a judgement call about
+    // --- Audio front-end. Each step is a judgement call about
     // someone else's room and microphone, so each is individually toggleable.
     /// Subtract the microphone's constant electrical offset.
     pub preprocess_remove_dc: bool,
@@ -54,7 +54,7 @@ pub struct Settings {
     /// Run the optional GTCRN speech denoiser when it is installed. Safe to
     /// leave on: with the model absent the stage logs a skip and does nothing.
     pub denoise_enabled: bool,
-    /// Measure how much of the recording is speech (§11's VAD stage). Also
+    /// Measure how much of the recording is speech (the VAD stage). Also
     /// a no-op unless the optional Silero VAD model is installed.
     pub vad_enabled: bool,
     /// Cut the silence out of the audio sent to STT. Off by default — see
@@ -101,11 +101,11 @@ impl Default for Settings {
 
 /// Provisional. On the one 57s sample available, sherpa-onnx's own default
 /// (0.5) shattered a single dominant voice into 8 speaker ids, while 0.9
-/// absorbed the second voice into the first. See docs/models.md — this needs
+/// absorbed the second voice into the first. See docs/benchmarks.md — this needs
 /// re-testing against labelled 3/5/10-speaker recordings (Phase 3).
 pub const DEFAULT_CLUSTER_THRESHOLD: f32 = 0.8;
 
-/// §1 and §8 both say these meetings are English + Tamil in the same sentence,
+/// These meetings are English + Tamil in the same sentence,
 /// so the whole-file single detection whisper.cpp's `auto` performs is the
 /// wrong default *for this app*: it locks to whichever language opens the
 /// recording and degrades the other for the rest of it. A user with
@@ -125,7 +125,7 @@ pub const DEFAULT_TARGET_RMS_DBFS: f32 = -20.0;
 pub const DEFAULT_VAD_PAD_MS: u32 = 200;
 
 /// whisper.cpp keeps gaining out to at least 24 threads on the i9-13950HX;
-/// sherpa-onnx peaks around 8 and gets slower past it. See docs/performance.md.
+/// sherpa-onnx peaks around 8 and gets slower past it. See docs/benchmarks.md.
 pub const MAX_STT_THREADS: usize = 24;
 pub const MAX_DIARIZATION_THREADS: usize = 8;
 /// llama.cpp on CPU stops scaling around the physical-core count; past that,
@@ -190,7 +190,7 @@ fn settings_path(data_dir: &Path) -> PathBuf {
 }
 
 /// Reads settings, falling back to defaults for a missing or corrupt file —
-/// a broken settings file must never stop someone recording a meeting (§33).
+/// a broken settings file must never stop someone recording a meeting.
 pub fn load(data_dir: &Path) -> Settings {
     match std::fs::read_to_string(settings_path(data_dir)) {
         Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|e| {
@@ -367,7 +367,7 @@ mod tests {
 
     #[test]
     fn stt_language_defaults_to_code_switched() {
-        // §1/§8: this app's meetings mix English and Tamil, so whisper's
+        // this app's meetings mix English and Tamil, so whisper's
         // one-detection-per-file `auto` is the wrong default here.
         assert_eq!(Settings::default().stt_language, "code-switched");
         assert_eq!(DEFAULT_STT_LANGUAGE, "code-switched");

@@ -5,7 +5,7 @@ import { Card, Notice, Spinner } from "./ui";
 import type { HostReport, ModelStatus } from "../types";
 
 interface Props {
-  /// Catalog entries this machine still needs (§27) — usually
+  /// Catalog entries this machine still needs — usually
   /// `SetupStatus.missing` or `ModelStatus[]` filtered to `required && !installed`.
   missing: ModelStatus[];
   /// Re-checks setup readiness once the batch finishes, successfully or not.
@@ -16,7 +16,7 @@ interface Props {
 }
 
 /**
- * The one-click "install what this machine needs" action (§27).
+ * The one-click "install what this machine needs" action.
  *
  * Cadence already picks the right model for the machine's RAM tier —
  * `Settings.stt_model`/`llm_model` default to `null`, which resolves to

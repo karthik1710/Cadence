@@ -1,4 +1,4 @@
-//! Voice activity detection — the §11 pipeline stage that was specified but
+//! Voice activity detection — the pipeline stage that was specified but
 //! never built.
 //!
 //! It earns its place twice over:
@@ -9,7 +9,7 @@
 //!    transcript without anyone having to listen back.
 //! 2. **Skipping silence before STT.** whisper.cpp costs the same per second
 //!    whether or not anyone is speaking, so dropping the gaps goes straight to
-//!    the §29 processing-time budget.
+//!    the processing-time budget.
 //!
 //! ## The timestamp trap
 //!
@@ -82,7 +82,7 @@ pub fn model_path(data_dir: &Path) -> PathBuf {
 }
 
 /// True when both the sherpa-onnx VAD binary and the Silero weights are
-/// installed. VAD is optional (§27) — the pipeline runs without it.
+/// installed. VAD is optional — the pipeline runs without it.
 pub fn is_available(data_dir: &Path) -> bool {
     binary_path(data_dir).exists() && model_path(data_dir).exists()
 }
@@ -652,7 +652,7 @@ not a segment
         // Every kept sample is speech, so nothing in the trimmed file is
         // digital silence for long — the cut landed where the timeline says.
         assert!(crate::pipeline::audio_profile::rms(&trimmed) > 0.3);
-        // §10: the input file is never modified.
+        // the input file is never modified.
         assert_eq!(std::fs::read(&input).unwrap(), before);
         let _ = std::fs::remove_dir_all(&dir);
     }

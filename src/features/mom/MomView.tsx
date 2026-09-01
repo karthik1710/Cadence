@@ -10,7 +10,7 @@ interface Props {
 }
 
 /**
- * The §24 minutes view. Every generated item shows the transcript evidence
+ * The minutes view. Every generated item shows the transcript evidence
  * behind it where there is any, and clicking that evidence plays the moment it
  * came from — which is what makes the minutes checkable rather than something
  * the user has to take on trust.

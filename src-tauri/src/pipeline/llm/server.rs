@@ -49,7 +49,7 @@ impl LlamaServer {
         }
         // Truncated per run: this is a diagnostic tail, not an audit trail, and
         // it must not grow without bound. llama.cpp does not log prompt or
-        // response text at its default verbosity (§34).
+        // response text at its default verbosity.
         let log = std::fs::File::create(log_path)
             .map_err(|e| format!("could not open {}: {e}", log_path.display()))?;
         let log_err = log.try_clone().map_err(|e| e.to_string())?;
@@ -120,7 +120,7 @@ impl LlamaServer {
         self.port
     }
 
-    /// Peak working set of the inference process, in MB — the §4 memory
+    /// Peak working set of the inference process, in MB — the memory
     /// budget's only real measurement, as opposed to the pre-flight estimate.
     pub fn peak_ram_mb(&self) -> Option<u64> {
         crate::system::peak_working_set_mb(&self.child)

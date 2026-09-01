@@ -1,6 +1,6 @@
 // Mirrors the Rust types in src-tauri/src. Field names are the serialized
 // ones, so anything renamed with `#[serde(rename)]` on the Rust side (the MoM
-// schema keys from master prompt §15) is spelled the same way here.
+// schema keys from the MoM schema) is spelled the same way here.
 
 export interface AudioDeviceInfo {
   name: string;
@@ -112,7 +112,7 @@ export interface Mom {
 }
 
 export interface Settings {
-  /** "auto" | "code-switched" | an ISO code such as "ta"/"en" (§8). */
+  /** "auto" | "code-switched" | an ISO code such as "ta"/"en". */
   stt_language: string;
   input_device: string | null;
   profile: string;
@@ -184,7 +184,7 @@ export interface VerifyReport {
   sha256: string | null;
 }
 
-/// The §12 stages the UI shows as a checklist, in order.
+/// The stages the UI shows as a checklist, in order.
 export const PIPELINE_STAGES: { state: MeetingState; label: string }[] = [
   { state: "PREPROCESSING", label: "Audio processing" },
   { state: "DIARIZING", label: "Speaker detection" },
@@ -194,7 +194,7 @@ export const PIPELINE_STAGES: { state: MeetingState; label: string }[] = [
   { state: "SYNTHESIZING", label: "Writing the minutes" },
 ];
 
-/** Live recording-quality meter (§9 input warnings). */
+/** Live recording-quality meter (input warnings). */
 export interface MicMeter {
   peak: number;
   peak_dbfs: number;

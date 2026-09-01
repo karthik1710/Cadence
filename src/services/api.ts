@@ -1,5 +1,5 @@
 // The single place the UI talks to Rust. Components never call `invoke`
-// directly — master prompt §19 keeps business logic out of React, and this is
+// directly — keeps business logic out of React, and this is
 // the seam that makes that enforceable.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -21,7 +21,7 @@ import type {
   VerifyReport,
 } from "../types";
 
-// --- audio (§9, §10) -------------------------------------------------------
+// --- audio -------------------------------------------------------
 
 export const listInputDevices = () =>
   invoke<AudioDeviceInfo[]>("list_input_devices");
@@ -48,7 +48,7 @@ export const testMicrophone = (deviceName: string | null, seconds?: number) =>
 export const profileMeetingAudio = (meetingId: string) =>
   invoke<AudioProfile>("profile_meeting_audio", { meetingId });
 
-// --- meeting lifecycle (§11, §12) -----------------------------------------
+// --- meeting lifecycle -----------------------------------------
 
 export const createMeeting = (title: string, notes: string) =>
   invoke<MeetingMetadata>("create_meeting", { title, notes });
@@ -75,7 +75,7 @@ export const regenerateMom = (meetingId: string) =>
 export const getProcessingStatus = (meetingId: string) =>
   invoke<MeetingStatus>("get_processing_status", { meetingId });
 
-// --- library (§23-§26) -----------------------------------------------------
+// --- library -----------------------------------------------------
 
 export const listMeetings = (
   query?: string,
@@ -117,7 +117,7 @@ export const exportMeeting = (meetingId: string, format: "markdown" | "json") =>
 export const revealMeetingFolder = (meetingId: string) =>
   invoke<string>("reveal_meeting_folder", { meetingId });
 
-// --- settings and models (§27) --------------------------------------------
+// --- settings and models --------------------------------------------
 
 export const getHostInfo = () => invoke<HostReport>("get_host_info");
 
@@ -158,7 +158,7 @@ export interface BatchInstallFailure {
 
 /**
  * Installs several catalog entries one after another — the "install the
- * recommended setup for this machine" action (§27), built entirely from the
+ * recommended setup for this machine" action, built entirely from the
  * per-model primitives above rather than a new backend command. `onProgress`
  * fires as each model's download/extract/verify advances; the returned list
  * holds only the ones that failed, so the caller can report success or

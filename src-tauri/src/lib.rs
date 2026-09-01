@@ -22,12 +22,12 @@ pub fn run() {
         .manage(InstallState::default())
         .setup(|app| {
             // A meeting that was recording or processing when the app last
-            // closed is marked recoverable here, before any UI reads it (§33).
+            // closed is marked recoverable here, before any UI reads it.
             processing::recover_on_startup(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Audio (§9, §10)
+            // Audio
             audio::list_input_devices,
             audio::start_recording,
             audio::stop_recording,
@@ -36,13 +36,13 @@ pub fn run() {
             audio::get_mic_meter,
             audio::test_microphone,
             pipeline::audio_profile::profile_meeting_audio,
-            // Meeting lifecycle and local processing (§11, §12)
+            // Meeting lifecycle and local processing
             processing::create_meeting,
             processing::finalize_recording,
             processing::start_processing,
             processing::regenerate_mom,
             processing::get_processing_status,
-            // Library, transcript, minutes, export (§23-§26)
+            // Library, transcript, minutes, export
             library::list_meetings,
             library::get_meeting,
             library::update_meeting,
@@ -52,7 +52,7 @@ pub fn run() {
             library::get_mom,
             library::export_meeting,
             library::reveal_meeting_folder,
-            // Settings and model management (§27)
+            // Settings and model management
             configuration::get_host_info,
             configuration::get_settings,
             configuration::save_settings,

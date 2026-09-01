@@ -1,4 +1,4 @@
-//! Local meeting storage and the history index (master prompt §21, §25).
+//! Local meeting storage and the history index.
 //!
 //! ```text
 //! <app_data>/
@@ -19,7 +19,7 @@
 //!
 //! `metadata.json` on disk is the source of truth; SQLite is a rebuildable
 //! index over it, holding only what the history list needs to sort and filter
-//! (§21: "do not duplicate full transcript data unnecessarily"). If the
+//! ("do not duplicate full transcript data unnecessarily"). If the
 //! database is lost or corrupted, [`list_meetings`] rebuilds it by scanning the
 //! meetings directory — no meeting can be lost to a broken index.
 
@@ -77,7 +77,7 @@ pub fn write_metadata(data_dir: &Path, meta: &MeetingMetadata) -> Result<(), Str
 }
 
 /// Applies `edit` to a meeting's metadata and saves it. Used for every state
-/// transition, so §12's state machine has exactly one write path.
+/// transition, so the state machine has exactly one write path.
 pub fn update_metadata<F: FnOnce(&mut MeetingMetadata)>(
     data_dir: &Path,
     meeting_id: &str,
@@ -131,7 +131,7 @@ pub fn wav_duration_ms(path: &Path) -> Result<i64, String> {
 }
 
 /// Deletes a meeting and everything in it. The only path that ever removes a
-/// recording, and only ever on an explicit user action (§10).
+/// recording, and only ever on an explicit user action.
 pub fn delete_meeting(data_dir: &Path, meeting_id: &str) -> Result<(), String> {
     let dir = meeting_dir(data_dir, meeting_id);
     if dir.exists() {
@@ -145,7 +145,7 @@ pub fn delete_meeting(data_dir: &Path, meeting_id: &str) -> Result<(), String> {
 }
 
 /// Marks meetings that were mid-processing when the app stopped as failed, so
-/// they show up as recoverable instead of permanently "in progress" (§12/§33).
+/// they show up as recoverable instead of permanently "in progress".
 /// Returns the ids it recovered.
 pub fn recover_interrupted(data_dir: &Path) -> Vec<String> {
     let mut recovered = Vec::new();
@@ -171,7 +171,7 @@ pub fn recover_interrupted(data_dir: &Path) -> Vec<String> {
 // ---------------------------------------------------------------- history
 
 /// Meetings newest first, optionally filtered by a title/notes substring and a
-/// created-at range (§25).
+/// created-at range.
 pub fn list_meetings(
     data_dir: &Path,
     query: Option<&str>,

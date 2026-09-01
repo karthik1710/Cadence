@@ -4,7 +4,7 @@
   needs (whisper.cpp, llama.cpp, sherpa-onnx + their model files) into the
   same directory the shipped app resolves at runtime (see
   src-tauri/src/pipeline/paths.rs). Dev-time convenience only — this is not
-  the production Model Manager UI (meeting-ai-app-PLAN.md §27, Phase 13).
+  the production Model Manager UI (src-tauri/src/models_manager.rs).
 
   Safe to re-run: every step is skipped if its output already exists.
 #>

@@ -1,6 +1,6 @@
-//! The ASR front-end (§11 "Audio preprocessing").
+//! The ASR front-end ("Audio preprocessing").
 //!
-//! `original.wav` is sacred (§10) — nothing here ever writes to it. Everything
+//! `original.wav` is sacred — nothing here ever writes to it. Everything
 //! below produces a *new* file, so a bad preprocessing choice costs a rerun,
 //! never a meeting.
 //!
@@ -31,7 +31,7 @@ pub const TARGET_SAMPLE_RATE: u32 = 16_000;
 /// hiss to transcribe.
 const MAX_BOOST_DB: f32 = 30.0;
 
-/// Which steps of the chain run. Every one is user-toggleable (§27) because
+/// Which steps of the chain run. Every one is user-toggleable because
 /// each is a judgement call about someone else's room and microphone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PreprocessOptions {
@@ -374,7 +374,7 @@ pub fn write_mono_16k(path: &Path, samples: &[f32]) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|e| format!("could not write {}: {e}", path.display()))
 }
 
-/// The same WAV, in memory. Code-switched STT (§8) cuts dozens of blocks out
+/// The same WAV, in memory. Code-switched STT cuts dozens of blocks out
 /// of one recording and posts each to whisper-server; none of them is an
 /// artifact worth keeping, so none of them touches the disk.
 pub fn encode_mono_16k(samples: &[f32]) -> Result<Vec<u8>, String> {
@@ -642,7 +642,7 @@ mod tests {
         assert_eq!(out_reader.spec().sample_rate, TARGET_SAMPLE_RATE);
         assert_eq!(out_reader.spec().bits_per_sample, 16);
 
-        // §10: the untouched recording stays byte-identical.
+        // the untouched recording stays byte-identical.
         assert_eq!(std::fs::read(&input).unwrap(), before);
         let _ = std::fs::remove_dir_all(&dir);
     }

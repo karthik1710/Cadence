@@ -1,4 +1,4 @@
-//! Versioned prompt templates (master prompt §17).
+//! Versioned prompt templates.
 //!
 //! Prompts live as plain text under `prompts/` at the repo root so they can be
 //! reviewed and diffed like any other source, and are compiled into the binary

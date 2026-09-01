@@ -1,9 +1,9 @@
 //! Tauri commands for the meeting library: history, transcript, minutes,
-//! speaker renaming, export (master prompt §23-§26).
+//! speaker renaming, export.
 //!
 //! These are thin: they resolve the data directory and delegate to `storage`
 //! and `export`. Business logic does not live in commands, and it certainly
-//! does not live in React (§19).
+//! does not live in React.
 
 use crate::export::{self, Format};
 use crate::pipeline::models::{MeetingMetadata, Mom, Transcript};
@@ -17,7 +17,7 @@ pub struct MeetingSummary {
     #[serde(flatten)]
     pub meta: MeetingMetadata,
     /// Absolute path to the original recording, if it still exists — the UI
-    /// uses it for timestamp-linked playback (§23).
+    /// uses it for timestamp-linked playback.
     pub audio_path: Option<String>,
 }
 
@@ -68,7 +68,7 @@ pub fn update_meeting(
     })
 }
 
-/// Renames a speaker for display only (§23). The stable id and the raw
+/// Renames a speaker for display only. The stable id and the raw
 /// `diarization.json` are never rewritten, so the underlying data stays
 /// exactly as the model produced it.
 #[tauri::command]
@@ -107,7 +107,7 @@ pub fn get_mom(app: AppHandle, meeting_id: String) -> Result<Mom, String> {
     storage::read_mom(&data_dir, &meeting_id)
 }
 
-/// Writes an export and returns its path (§26: Markdown and JSON in V1).
+/// Writes an export and returns its path (Markdown and JSON in V1).
 #[tauri::command]
 pub fn export_meeting(
     app: AppHandle,

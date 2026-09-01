@@ -4,14 +4,14 @@ use crate::pipeline::models::{
 use std::collections::HashMap;
 
 /// Consecutive same-speaker STT fragments closer than this are one turn.
-/// whisper.cpp runs with `--max-len 80` (docs/models.md), so it emits short
+/// whisper.cpp runs with `--max-len 80` (docs/benchmarks.md), so it emits short
 /// fragments that would otherwise render as a wall of one-line speaker blocks.
 const MERGE_GAP_MS: i64 = 1_000;
 
 const UNKNOWN_SPEAKER: &str = "SPEAKER_UNKNOWN";
 
 /// Merges STT segments with diarization intervals into the canonical
-/// speaker-labelled transcript (master prompt §13).
+/// speaker-labelled transcript.
 ///
 /// Speaker attribution is per STT segment by maximum temporal overlap: when a
 /// speaker change falls inside one segment, the segment goes wholly to
@@ -58,7 +58,7 @@ pub fn align(stt: &[SttSegment], diarization: &[DiarizationSegment]) -> Vec<Tran
     turns
 }
 
-/// The language of a turn built from two fragments (§8).
+/// The language of a turn built from two fragments.
 ///
 /// Two fragments detected differently is the code switch itself, and the turn
 /// is honestly [`MIXED_LANGUAGE`] rather than whichever half came first. An
@@ -104,7 +104,7 @@ fn gap_to(seg: &SttSegment, d: &DiarizationSegment) -> i64 {
 }
 
 /// sherpa-onnx's numeric cluster id ("0", "1", …) to the stable internal id
-/// the rest of the app uses (master prompt §7).
+/// the rest of the app uses.
 fn stable_id(raw: &str) -> String {
     match raw.trim().parse::<u32>() {
         Ok(n) => format!("SPEAKER_{n:02}"),
@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(segments[2].speaker_label, "Person 1");
     }
 
-    // ------------------------------------------------------- language (§8)
+    // ------------------------------------------------------- language
 
     #[test]
     fn a_turn_in_one_language_keeps_that_language() {

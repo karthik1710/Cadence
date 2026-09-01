@@ -1,11 +1,11 @@
-//! Phase 13 Model Manager (master prompt §27): the catalog of installable
+//! Phase 13 Model Manager: the catalog of installable
 //! native runtimes and model weights, plus install / remove / verify.
 //!
 //! Two rules shape this module:
 //!
-//! * **Model files are never bundled into the installer** (§27/§35). They are
+//! * **Model files are never bundled into the installer**. They are
 //!   downloaded once, into `<app_data>/models`, and the app runs fully offline
-//!   afterwards (§28). Downloading happens only here, only when the user asks
+//!   afterwards. Downloading happens only here, only when the user asks
 //!   for it — never during recording, processing, or MoM generation.
 //! * **Nothing links an HTTP client.** Downloads shell out to `curl.exe` and
 //!   extraction to `tar.exe`, both shipped with Windows 10 1803+ and Windows
@@ -18,7 +18,7 @@
 //! installed file is computed at install time and recorded in
 //! `models/manifest.json`, and [`verify`] recomputes it. That detects
 //! corruption, truncation, and post-install tampering, but not a compromised
-//! first download. See docs/privacy.md.
+//! first download. See docs/architecture.md.
 
 use crate::system::MemoryProfile;
 use serde::{Deserialize, Serialize};
@@ -36,9 +36,9 @@ pub enum ModelKind {
     Stt,
     Llm,
     Diarization,
-    /// Optional speech enhancement (§11 audio preprocessing).
+    /// Optional speech enhancement (audio preprocessing).
     Denoise,
-    /// Optional voice activity detection (§11).
+    /// Optional voice activity detection.
     Vad,
 }
 
@@ -80,7 +80,7 @@ impl CatalogEntry {
     }
 
     /// Estimated peak process RAM for an LLM entry at `context_tokens`
-    /// (§4/§30 "memory usage"). Weights are memory-mapped but resident in
+    /// ("memory usage"). Weights are memory-mapped but resident in
     /// practice, and the KV cache is budgeted at ~0.15 MB per token, which is
     /// the right order for the Qwen3 family's grouped-query attention. This is
     /// a pre-flight sanity check, not a measurement — real numbers come from
@@ -165,7 +165,7 @@ pub fn catalog() -> &'static [CatalogEntry] {
             archive: None,
             expect_relative: "ggml-medium.bin",
             approx_size_mb: 1530,
-            notes: "Most accurate candidate; roughly 3x slower than small. Benchmark before adopting (§6).",
+            notes: "Most accurate candidate; roughly 3x slower than small. Benchmark before adopting.",
         },
         CatalogEntry {
             id: "qwen3-4b-q4",
@@ -189,7 +189,7 @@ pub fn catalog() -> &'static [CatalogEntry] {
             archive: None,
             expect_relative: "Qwen3-8B-Q4_K_M.gguf",
             approx_size_mb: 5030,
-            notes: "Default on 32 GB machines. Quality candidate (§5).",
+            notes: "Default on 32 GB machines. Quality candidate.",
         },
         CatalogEntry {
             id: "gemma3-4b-q4",
@@ -201,7 +201,7 @@ pub fn catalog() -> &'static [CatalogEntry] {
             archive: None,
             expect_relative: "gemma-3-4b-it-Q4_K_M.gguf",
             approx_size_mb: 2490,
-            notes: "Multilingual comparison candidate (§5). Optional — install only to benchmark.",
+            notes: "Multilingual comparison candidate. Optional — install only to benchmark.",
         },
         CatalogEntry {
             id: "diarization-segmentation",
@@ -229,7 +229,7 @@ pub fn catalog() -> &'static [CatalogEntry] {
         },
         // The two entries below are optional on purpose: they improve audio
         // quality and processing time, and the app must still transcribe a
-        // meeting end to end without either of them (§33).
+        // meeting end to end without either of them.
         CatalogEntry {
             id: "denoise-gtcrn",
             kind: ModelKind::Denoise,
@@ -321,7 +321,7 @@ pub struct ModelStatus {
     pub approx_size_mb: u64,
     pub actual_size_mb: u64,
     pub notes: String,
-    /// True when this id is one the current machine needs (§27 health check).
+    /// True when this id is one the current machine needs (health check).
     pub required: bool,
     /// SHA-256 recorded at install time, if any.
     pub recorded_sha256: Option<String>,
@@ -639,7 +639,7 @@ pub struct VerifyReport {
     pub sha256: Option<String>,
 }
 
-/// §27's "model health check": the file is present, non-empty, and still
+/// the "model health check": the file is present, non-empty, and still
 /// hashes to what it hashed to at install time.
 pub fn verify(models_dir: &Path, id: &str) -> Result<VerifyReport, String> {
     let entry = entry(id).ok_or_else(|| format!("unknown model id: {id}"))?;

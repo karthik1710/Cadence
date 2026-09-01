@@ -1,4 +1,4 @@
-//! Tauri commands that drive the local pipeline and the §12 meeting state
+//! Tauri commands that drive the local pipeline and the meeting state
 //! machine.
 //!
 //! Every one of these runs on this machine. There is no upload, no job queue,
@@ -19,7 +19,7 @@ use tauri::{AppHandle, Manager, State};
 
 /// Live processing status per meeting id. In-memory only: the durable record
 /// is `metadata.json`, which every stage transition also writes, so an
-/// interrupted meeting is recognised on the next start (§33).
+/// interrupted meeting is recognised on the next start.
 pub type ProcessingState = Arc<Mutex<HashMap<String, MeetingStatus>>>;
 
 pub fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -291,7 +291,7 @@ pub fn get_processing_status(
 }
 
 /// Marks meetings that were interrupted by an app close or crash, so they
-/// appear as recoverable rather than stuck (§12/§33). Called once at startup.
+/// appear as recoverable rather than stuck. Called once at startup.
 pub fn recover_on_startup(app: &AppHandle) {
     let Ok(data_dir) = app_data_dir(app) else {
         return;

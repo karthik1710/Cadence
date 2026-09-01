@@ -1,4 +1,4 @@
-//! Speaker-aware chunking for MoM generation (master prompt §14, §18).
+//! Speaker-aware chunking for MoM generation.
 //!
 //! A 60-minute meeting cannot be handed to a local model in one piece — not on
 //! a 32 GB machine and certainly not on a 16 GB one, where the context window
@@ -9,7 +9,7 @@
 //!
 //! * **A turn is never split.** Cutting a speaker mid-sentence is how you get
 //!   an action item attributed to the wrong person, or half a decision.
-//! * **Timestamps survive chunking** (§18, "never lose original timestamps").
+//! * **Timestamps survive chunking** ("never lose original timestamps").
 //!   Each rendered turn carries its own second-offset so the model can quote it
 //!   back as evidence.
 
@@ -51,7 +51,7 @@ impl Chunk {
 ///
 /// Deliberately pessimistic: it assumes ~2 characters per token, because Tamil
 /// text in UTF-8 tokenizes far denser than English does, and a code-switched
-/// meeting (§8) is a mix of both. Only about a third of the window is spent on
+/// meeting is a mix of both. Only about a third of the window is spent on
 /// transcript — the rest holds the instructions and leaves room for the answer.
 pub fn max_chunk_chars(context_tokens: usize) -> usize {
     let budget = (context_tokens as f64 * 0.35 * 2.0) as usize;

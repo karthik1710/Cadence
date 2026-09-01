@@ -3,68 +3,32 @@
  *
  * An analog waveform — a continuous swept curve, not the blocky bar-graph
  * every recorder app uses — drawn twice: the solid stroke, plus a faded copy
- * trailing behind it. That trailing copy is the "echo" half of the name, and
- * it's the only decoration here; at 22px in the header, anything more detailed
- * turns to mush.
+ * trailing behind it. That trailing copy is the "echo" half of the name.
  *
- * The gradient ids are suffixed per instance because two SVGs on one page with
- * the same `<defs>` id will silently share the first one's definition.
+ * This renders `public/logo.png`, which is the single raster every surface
+ * shares: this header mark, the browser/webview favicon (index.html), the
+ * README, and — via `tauri icon` — every file in `src-tauri/icons/`. It used
+ * to be a hand-inlined <svg> here, which meant the mark existed in two places
+ * that could (and did) drift apart. One asset now, so they cannot.
+ *
+ * `public/logo.svg` remains the vector master. If you change it, regenerate
+ * both the raster and the app icons so nothing falls out of step:
+ *
+ *   npx tauri icon public/logo.svg -o <tmp> --png 1024
+ *   cp <tmp>/1024x1024.png public/logo.png
+ *   npx tauri icon public/logo.png       # rewrites src-tauri/icons/
  */
-export function AppLogo({
-  size = 28,
-  id = "app",
-}: {
-  size?: number;
-  /** Unique per rendered instance — see the note on gradient ids above. */
-  id?: string;
-}) {
-  const fill = `cadence-tile-${id}`;
-  const wave = `cadence-wave-${id}`;
-
+export function AppLogo({ size = 28 }: { size?: number }) {
   return (
-    <svg
+    <img
       className="app-logo"
+      src="/logo.png"
       width={size}
       height={size}
-      viewBox="0 0 48 48"
-      role="img"
-      aria-label="Cadence"
-    >
-      <defs>
-        <linearGradient id={fill} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#7c8fff" />
-          <stop offset="100%" stopColor="#58d8c9" />
-        </linearGradient>
-        <linearGradient id={wave} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.85" />
-          <stop offset="50%" stopColor="#ffffff" />
-          <stop offset="100%" stopColor="#ffffff" stopOpacity="0.85" />
-        </linearGradient>
-      </defs>
-
-      <rect x="0" y="0" width="48" height="48" rx="12" fill={`url(#${fill})`} />
-
-      {/* The echo: the same curve, trailing and dimmed. */}
-      <path
-        d="M9 24 C11 24 12 20 14.5 20 C17 20 17.5 31 20.5 31 C23.5 31 23.5 15 26.5 15 C29.5 15 29.5 30 32.5 30 C35 30 35.5 22 37 22 C38.5 22 38.5 24 39 24"
-        fill="none"
-        stroke="#ffffff"
-        strokeOpacity="0.32"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        transform="translate(2.5 3.5)"
-      />
-
-      {/* The signal itself. */}
-      <path
-        d="M9 24 C11 24 12 20 14.5 20 C17 20 17.5 31 20.5 31 C23.5 31 23.5 15 26.5 15 C29.5 15 29.5 30 32.5 30 C35 30 35.5 22 37 22 C38.5 22 38.5 24 39 24"
-        fill="none"
-        stroke={`url(#${wave})`}
-        strokeWidth="3.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+      alt="Cadence"
+      // The mark is decorative next to the "Cadence" wordmark it sits beside;
+      // dragging it out of the header is never what anyone means to do.
+      draggable={false}
+    />
   );
 }

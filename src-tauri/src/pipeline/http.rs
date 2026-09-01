@@ -16,8 +16,8 @@
 //!
 //! The alternative — re-running `llama-cli.exe` / `whisper-cli.exe` once per
 //! prompt or per audio block — was rejected because MoM generation makes one
-//! call per transcript chunk (§14) and code-switched STT one call per ~30 s
-//! block (§8), and reloading the weights every time would dominate the §29
+//! call per transcript chunk and code-switched STT one call per ~30 s
+//! block, and reloading the weights every time would dominate the
 //! processing-time budget.
 
 use std::io::{Read, Write};

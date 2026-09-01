@@ -18,7 +18,7 @@ pub struct SttSegment {
     #[serde(default)]
     pub words: Vec<SttWord>,
     /// ISO code of the language whisper detected for the block this segment
-    /// came from (§8). Only code-switched mode detects per block, so it is
+    /// came from. Only code-switched mode detects per block, so it is
     /// `None` in every other mode — and omitted from `stt.json` entirely, so
     /// a file written before this existed reads back identically.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -34,17 +34,17 @@ pub struct DiarizationSegment {
     pub end_ms: i64,
 }
 
-/// One turn in the final speaker-labelled transcript (master prompt §13).
+/// One turn in the final speaker-labelled transcript.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranscriptSegment {
     /// Stable internal id, e.g. "SPEAKER_00" — never renamed.
     pub speaker: String,
-    /// Presentation label, e.g. "Person 1" — first-appearance order (§7).
+    /// Presentation label, e.g. "Person 1" — first-appearance order.
     pub speaker_label: String,
     pub start_ms: i64,
     pub end_ms: i64,
     pub text: String,
-    /// Detected language for this turn (§8): an ISO code, or [`MIXED_LANGUAGE`]
+    /// Detected language for this turn: an ISO code, or [`MIXED_LANGUAGE`]
     /// when the turn was assembled from fragments whisper detected differently.
     /// `None` outside code-switched mode, and skipped when serializing so an
     /// older `transcript.json` round-trips unchanged.
@@ -52,7 +52,7 @@ pub struct TranscriptSegment {
     pub language: Option<String>,
 }
 
-/// Marks a turn that spans more than one detected language — the thing §8
+/// Marks a turn that spans more than one detected language — the thing
 /// exists for. Not an ISO code, and deliberately not one: no ISO 639 code is
 /// `"mixed"`, so nothing downstream can confuse the two.
 pub const MIXED_LANGUAGE: &str = "mixed";
@@ -69,7 +69,7 @@ impl Transcript {
     }
 
     /// Presentation labels in first-appearance order — the grounded
-    /// participant list (§16: participants are never invented by the LLM).
+    /// participant list (participants are never invented by the LLM).
     pub fn speaker_labels(&self) -> Vec<String> {
         let mut seen = Vec::new();
         for segment in &self.segments {
@@ -83,7 +83,7 @@ impl Transcript {
 
 // ------------------------------------------------------------------- MoM
 
-/// A generated statement plus the transcript evidence behind it (§15: "every
+/// A generated statement plus the transcript evidence behind it ("every
 /// important generated item should reference supporting transcript timestamps
 /// when possible"). `timestamp` is milliseconds from the start of the meeting,
 /// matching every other timestamp in the app.
@@ -149,7 +149,7 @@ fn number_to_i64(value: &serde_json::Value) -> Option<i64> {
     }
 }
 
-/// Matches the master prompt §15 action-item shape.
+/// Matches the action-item shape.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActionItem {
     #[serde(default)]
@@ -163,7 +163,7 @@ pub struct ActionItem {
     /// "high" | "medium" | "low" — deliberately lenient at parse time
     /// (defaults to empty rather than failing deserialization); `validate()`
     /// below is what actually enforces the allowed values and triggers the
-    /// repair-JSON retry (§16/§17) on a malformed LLM response.
+    /// repair-JSON retry on a malformed LLM response.
     #[serde(default)]
     pub confidence: String,
 }
@@ -175,7 +175,7 @@ fn lenient_timestamp<'de, D: Deserializer<'de>>(
     Ok(number_to_i64(&value))
 }
 
-/// Provenance for a generated MoM (§17): which model, which quantization,
+/// Provenance for a generated MoM: which model, which quantization,
 /// which prompt versions, and when.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MomMeta {
@@ -194,7 +194,7 @@ pub struct MomMeta {
     pub duration_ms: i64,
 }
 
-/// Matches the master prompt §15 MoM schema, with evidence attached (§15/§16).
+/// Matches the MoM schema, with evidence attached.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Mom {
     #[serde(default)]
@@ -218,7 +218,7 @@ pub struct Mom {
 }
 
 impl Mom {
-    /// Structural validation only (§16): catches malformed shape so the
+    /// Structural validation only: catches malformed shape so the
     /// caller can retry through the repair-JSON prompt. It cannot verify the
     /// LLM didn't hallucinate a fact — that's a prompting and grounding
     /// concern, handled in `mom.rs` — only that the response is well-formed
@@ -251,7 +251,7 @@ impl Mom {
         Ok(())
     }
 
-    /// Shape shown to the model in the repair prompt (§17).
+    /// Shape shown to the model in the repair prompt.
     pub fn schema_hint() -> &'static str {
         r#"{
   "summary": "string, non-empty",
@@ -266,7 +266,7 @@ impl Mom {
     }
 }
 
-/// What one chunk's extraction pass returns (§14).
+/// What one chunk's extraction pass returns.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChunkExtraction {
     #[serde(default)]
@@ -296,7 +296,7 @@ impl ChunkExtraction {
 
 // --------------------------------------------------------- meeting state
 
-/// The §12 meeting state machine. Persisted in `metadata.json`, so a meeting
+/// The meeting state machine. Persisted in `metadata.json`, so a meeting
 /// that was mid-processing when the app closed can be recognised on restart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -364,7 +364,7 @@ impl MeetingState {
     }
 
     /// Rough completion percentage, for the progress UI. The weights follow
-    /// measured stage costs (docs/performance.md): transcription and MoM
+    /// measured stage costs (docs/benchmarks.md): transcription and MoM
     /// generation dominate.
     pub fn progress(self) -> i64 {
         match self {
@@ -384,7 +384,7 @@ impl MeetingState {
 
 /// Everything about a meeting that is not audio, transcript, or minutes.
 /// Written to `<meeting>/metadata.json` and mirrored into SQLite for history
-/// (§21).
+///.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeetingMetadata {
     pub id: String,
@@ -403,7 +403,7 @@ pub struct MeetingMetadata {
     pub sample_rate: u32,
     #[serde(default)]
     pub channels: u16,
-    /// User-assigned display names per stable speaker id (§23). Presentation
+    /// User-assigned display names per stable speaker id. Presentation
     /// metadata only — the raw diarization output is never rewritten.
     #[serde(default)]
     pub speaker_names: BTreeMap<String, String>,
@@ -413,7 +413,7 @@ pub struct MeetingMetadata {
     pub has_mom: bool,
     /// Set when the transcript succeeded but minutes generation did not. The
     /// meeting is complete and usable; this is what the UI shows next to the
-    /// "Generate minutes" retry (§33).
+    /// "Generate minutes" retry.
     #[serde(default)]
     pub mom_error: Option<String>,
 }
@@ -452,7 +452,7 @@ impl MeetingMetadata {
 pub struct MeetingStatus {
     /// "idle" | "processing" | "completed" | "failed"
     pub status: String,
-    /// One of the §12 state-machine stages while processing.
+    /// One of the state-machine stages while processing.
     pub stage: Option<String>,
     pub progress: i64,
     pub error: Option<String>,
@@ -622,7 +622,7 @@ mod tests {
 
     #[test]
     fn a_transcript_written_before_language_tags_existed_still_loads() {
-        // Exactly the shape `transcript.json` had before §8's per-block
+        // Exactly the shape `transcript.json` had before the per-block
         // detection: a meeting on disk must not become unreadable.
         let raw = r#"{
             "meeting_id": "abc",

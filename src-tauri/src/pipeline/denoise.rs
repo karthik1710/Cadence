@@ -3,10 +3,10 @@
 //! Meeting rooms are noisy in ways a high-pass filter cannot fix — keyboards,
 //! projector fans, a corridor through an open door. GTCRN is a small ONNX
 //! speech-enhancement model that runs on CPU at a fraction of real time, which
-//! keeps it inside the §29 budget.
+//! keeps it inside the budget.
 //!
 //! It is deliberately **optional** (not in `models_manager::required_ids`):
-//! nothing about Cadence stops working without it, and §33 says a processing
+//! nothing about Cadence stops working without it, and a processing
 //! stage must never cost a meeting. So a missing model is a logged skip, not a
 //! failure, and even a denoiser that crashes mid-run leaves the pipeline with
 //! the perfectly usable un-denoised audio it started from.

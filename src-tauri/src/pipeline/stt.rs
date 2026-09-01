@@ -1,4 +1,4 @@
-//! Speech-to-text, and the three ways §8 lets a user ask for a language.
+//! Speech-to-text, and the three ways a user can ask for a language.
 //!
 //! whisper.cpp's `--language auto` detects **once**, from the opening window,
 //! and decodes the whole file in whatever it found. That is fine for a
@@ -22,7 +22,7 @@ use std::process::Command;
 pub enum SttLanguage {
     /// whisper.cpp's own `auto`: one detection for the whole recording.
     Auto,
-    /// One detection per ~30 s block (§8). The default, because §1 says these
+    /// One detection per ~30 s block. The default, because these
     /// meetings are code-switched.
     CodeSwitched,
     /// An ISO code the user forced, passed straight through to whisper.
@@ -32,7 +32,7 @@ pub enum SttLanguage {
 impl SttLanguage {
     /// Anything unrecognisable resolves to [`SttLanguage::Auto`] rather than
     /// being handed to whisper to reject: a hand-edited settings file must not
-    /// cost someone every meeting they record afterwards (§33).
+    /// cost someone every meeting they record afterwards.
     pub fn parse(raw: &str) -> Self {
         let value = raw.trim().to_ascii_lowercase();
         match value.as_str() {
@@ -81,7 +81,7 @@ pub struct SttOutcome {
     pub segments: Vec<SttSegment>,
     pub metrics: StageMetrics,
     /// Anything the user should know about how this ran — in practice, that
-    /// code-switched mode wanted to run and could not (§33: never silent).
+    /// code-switched mode wanted to run and could not (never silent).
     pub warnings: Vec<String>,
     /// Blocks transcribed. `None` for a single pass.
     pub blocks: Option<usize>,
@@ -178,12 +178,12 @@ fn distinct_languages(segments: &[SttSegment]) -> Vec<String> {
 /// One `whisper-cli.exe` invocation over the whole file.
 ///
 /// The `--max-len 80 --split-on-word --max-context 0` flags are load-bearing,
-/// not tuning knobs — see docs/models.md: without them whisper.cpp has been
+/// not tuning knobs — see docs/benchmarks.md: without them whisper.cpp has been
 /// observed to silently collapse a real, multi-second span of speech into a
 /// short, wrong sentence.
 ///
-/// NOTE: `--translate` is never passed, and must never be added. §8 requires
-/// the transcript to preserve the language actually spoken; translating here
+/// NOTE: `--translate` is never passed, and must never be added. The transcript must
+/// preserve the language actually spoken; translating here
 /// would destroy the original words for good. The minutes are the only thing
 /// that gets rendered into another language, via `mom_language`.
 fn single_pass(

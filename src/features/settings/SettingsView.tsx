@@ -39,7 +39,7 @@ function numberOrNull(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** The §27 settings screen: what this machine is, what is installed, how it runs. */
+/** The settings screen: what this machine is, what is installed, how it runs. */
 export function SettingsView({ onSetupChanged, onThemeSaved }: Props) {
   const [host, setHost] = useState<HostReport | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);

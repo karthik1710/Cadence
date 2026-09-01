@@ -24,7 +24,7 @@ function endOfDay(value: string): number | null {
   return start === null ? null : start + DAY_MS - 1;
 }
 
-/** The §25 library: list, title search, date filtering. */
+/** The library: list, title search, date filtering. */
 export function HistoryView({ onOpenMeeting, reloadToken }: Props) {
   const [query, setQuery] = useState("");
   const [from, setFrom] = useState("");

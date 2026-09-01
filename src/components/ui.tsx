@@ -105,7 +105,7 @@ export function LevelMeter({ level }: { level: number }) {
 }
 
 /**
- * The §22 "after recording" checklist. Stages before the current one are done,
+ * The "after recording" checklist. Stages before the current one are done,
  * the current one is running, later ones are pending.
  */
 export function StageChecklist({

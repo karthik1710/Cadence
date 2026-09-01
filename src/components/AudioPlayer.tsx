@@ -3,7 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { timecode } from "../services/format";
 
 export interface AudioPlayerHandle {
-  /** Seeks to a transcript timestamp and plays from there (§23). */
+  /** Seeks to a transcript timestamp and plays from there. */
   seekTo: (ms: number) => void;
 }
 

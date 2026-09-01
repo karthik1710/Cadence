@@ -1,8 +1,8 @@
-//! The swappable local-LLM layer (master prompt §5, §19).
+//! The swappable local-LLM layer.
 //!
 //! Everything above this module talks to [`LlmProvider`], so the model, the
 //! quantization and even the runtime can change after benchmarking without the
-//! MoM code or the UI knowing (§5 forbids committing to a model before those
+//! MoM code or the UI knowing (forbids committing to a model before those
 //! benchmarks exist). [`LlamaCppProvider`] is the shipped implementation;
 //! [`MockLlm`] is what the tests use.
 
@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
 
-/// Provenance recorded with every generated MoM (§17).
+/// Provenance recorded with every generated MoM.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmDescriptor {
     pub model: String,
@@ -34,7 +34,7 @@ pub trait LlmProvider {
 
     /// Runs one completion that is expected to return a single JSON object.
     /// Implementations return the raw text; JSON extraction and schema
-    /// validation are the caller's job (§16 — invalid JSON must be repaired
+    /// validation are the caller's job (invalid JSON must be repaired
     /// and retried, never silently accepted).
     fn complete_json(&self, system: &str, user: &str, max_tokens: usize) -> Result<String, String>;
 }
@@ -53,8 +53,8 @@ impl LlamaCppProvider {
     ///
     /// Refuses to start a model that plainly will not fit in the machine's
     /// free RAM, with a message naming a smaller one — on a 16 GB laptop, an
-    /// out-of-memory kill mid-generation would lose the MoM stage, and §33
-    /// says failures must be legible and recoverable, not mysterious.
+    /// out-of-memory kill mid-generation would lose the MoM stage, and
+    /// failures must be legible and recoverable, not mysterious.
     pub fn start(
         paths: &ModelPaths,
         settings: &Settings,
@@ -97,7 +97,7 @@ impl LlamaCppProvider {
 }
 
 impl LlamaCppProvider {
-    /// Measured peak RAM of the inference process (§4, §30). `None` before the
+    /// Measured peak RAM of the inference process. `None` before the
     /// process has done any work, or on a non-Windows build.
     pub fn peak_ram_mb(&self) -> Option<u64> {
         self.server.peak_ram_mb()
@@ -111,7 +111,7 @@ impl LlmProvider for LlamaCppProvider {
 
     fn complete_json(&self, system: &str, user: &str, max_tokens: usize) -> Result<String, String> {
         // Low temperature: minutes are an extraction task, and sampling
-        // variety here shows up as invented detail (§16).
+        // variety here shows up as invented detail.
         let mut body = serde_json::json!({
             "messages": [
                 {"role": "system", "content": system},
@@ -292,7 +292,7 @@ fn truncate(text: &str, max: usize) -> String {
     text.chars().take(max).collect::<String>() + "…"
 }
 
-/// Scripted provider for tests (§32 "mocked AI providers") and for the
+/// Scripted provider for tests ("mocked AI providers") and for the
 /// `--dry-run` mode of the CLI runners.
 pub struct MockLlm {
     responses: std::sync::Mutex<Vec<String>>,

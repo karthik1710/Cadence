@@ -471,7 +471,8 @@ fn download(
     if dest.exists() {
         let _ = std::fs::remove_file(dest);
     }
-    let mut child = Command::new("curl.exe")
+    let mut command = Command::new("curl.exe");
+    command
         .arg("-L")
         .arg("--fail")
         .arg("--silent")
@@ -480,7 +481,9 @@ fn download(
         .arg(dest)
         .arg(entry.url)
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    crate::system::hide_console(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|e| {
             format!("could not launch curl.exe (needed to download models): {e}")
@@ -530,11 +533,10 @@ fn download(
 /// Windows' bundled bsdtar reads `.zip` and `.tar.bz2` alike, so one call
 /// covers every archive in the catalog.
 fn extract(archive: &Path, dest: &Path) -> Result<(), String> {
-    let output = Command::new("tar.exe")
-        .arg("-xf")
-        .arg(archive)
-        .arg("-C")
-        .arg(dest)
+    let mut command = Command::new("tar.exe");
+    command.arg("-xf").arg(archive).arg("-C").arg(dest);
+    crate::system::hide_console(&mut command);
+    let output = command
         .output()
         .map_err(|e| format!("could not launch tar.exe (needed to unpack models): {e}"))?;
     if !output.status.success() {

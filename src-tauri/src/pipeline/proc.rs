@@ -37,6 +37,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(250);
 /// sherpa-onnx print thousands of segment lines, and leaving those in a pipe
 /// while polling would deadlock as soon as the buffer filled.
 pub fn run_measured(mut command: Command) -> Result<Measured, String> {
+    system::hide_console(&mut command);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let program = command.get_program().to_string_lossy().to_string();

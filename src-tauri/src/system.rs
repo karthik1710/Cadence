@@ -241,6 +241,19 @@ pub fn peak_working_set_mb(_child: &std::process::Child) -> Option<u64> {
     None
 }
 
+/// Stops a console window from flashing open behind Cadence — a windowed GUI
+/// app with no console of its own — every time it shells out to curl, tar,
+/// whisper-cli, llama-server, or sherpa-onnx. Call before `spawn`/`output`.
+#[cfg(windows)]
+pub fn hide_console(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub fn hide_console(_command: &mut std::process::Command) {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

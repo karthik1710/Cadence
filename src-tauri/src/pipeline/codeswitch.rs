@@ -391,7 +391,8 @@ impl WhisperServer {
             .map_err(|e| format!("could not open {}: {e}", log_path.display()))?;
         let log_err = log.try_clone().map_err(|e| e.to_string())?;
 
-        let child = Command::new(exe)
+        let mut command = Command::new(exe);
+        command
             .arg("-m")
             .arg(model)
             // Loopback only: never reachable from another machine.
@@ -412,7 +413,9 @@ impl WhisperServer {
             .arg("5")
             .stdin(Stdio::null())
             .stdout(Stdio::from(log))
-            .stderr(Stdio::from(log_err))
+            .stderr(Stdio::from(log_err));
+        crate::system::hide_console(&mut command);
+        let child = command
             .spawn()
             .map_err(|e| format!("failed to launch whisper-server.exe: {e}"))?;
 

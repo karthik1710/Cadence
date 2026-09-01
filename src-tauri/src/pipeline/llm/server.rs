@@ -54,7 +54,8 @@ impl LlamaServer {
             .map_err(|e| format!("could not open {}: {e}", log_path.display()))?;
         let log_err = log.try_clone().map_err(|e| e.to_string())?;
 
-        let child = Command::new(exe)
+        let mut command = Command::new(exe);
+        command
             .arg("--model")
             .arg(model)
             // Loopback only: the inference server is never reachable from
@@ -72,7 +73,9 @@ impl LlamaServer {
             .arg("--jinja")
             .stdin(Stdio::null())
             .stdout(Stdio::from(log))
-            .stderr(Stdio::from(log_err))
+            .stderr(Stdio::from(log_err));
+        crate::system::hide_console(&mut command);
+        let child = command
             .spawn()
             .map_err(|e| format!("failed to launch llama-server.exe: {e}"))?;
 

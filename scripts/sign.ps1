@@ -53,6 +53,16 @@ param(
     [string]$Path
 )
 
+# Started as Windows PowerShell 5.1 from a PowerShell 7 parent (GitHub
+# Actions' pwsh steps, or `npm run tauri build` typed in a pwsh terminal), this
+# process inherits pwsh's PSModulePath and picks up 7.x builds of the core
+# modules it cannot load, so cmdlets such as Get-FileHash vanish. Use Windows
+# PowerShell's own module path instead.
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    $env:PSModulePath = [Environment]::ExpandEnvironmentVariables(
+        [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine'))
+}
+
 $ErrorActionPreference = 'Stop'
 
 # Every failure below - a throw, or Write-Error under 'Stop' - lands here: it

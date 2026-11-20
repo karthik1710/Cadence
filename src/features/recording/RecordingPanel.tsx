@@ -5,12 +5,14 @@ import { useRecorder } from "../../hooks/useRecorder";
 import { useProcessingStatus } from "../../hooks/useProcessingStatus";
 import { Card, LevelMeter, Notice, Spinner, StageChecklist } from "../../components/ui";
 import type { ModelStatus } from "../../types";
+import { SpeakerCountField } from "./SpeakerCountField";
 
 interface Props {
   onOpenMeeting: (id: string) => void;
   setupReady: boolean;
   missingModels: ModelStatus[];
-  onOpenSettings: () => void;
+  /** Back to the first-run setup screen, for someone who skipped it. */
+  onOpenSetup: () => void;
 }
 
 /** Sentinel for "whatever Windows considers default", which Rust spells `null`. */
@@ -27,12 +29,17 @@ export function RecordingPanel({
   onOpenMeeting,
   setupReady,
   missingModels,
-  onOpenSettings,
+  onOpenSetup,
 }: Props) {
   const recorder = useRecorder();
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [selectedDevice, setSelectedDevice] = useState(DEFAULT_DEVICE);
+  // The next meeting's speaker-count hint, and the one the meeting being
+  // processed was started with — kept apart so a retry reuses the latter even
+  // after the field has been reset for the next meeting.
+  const [speakers, setSpeakers] = useState<number | null>(null);
+  const [activeSpeakers, setActiveSpeakers] = useState<number | null>(null);
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [runToken, setRunToken] = useState(0);
@@ -80,9 +87,13 @@ export function RecordingPanel({
         return;
       }
       await api.finalizeRecording(id, deviceName, summary.sample_rate, summary.channels);
-      await api.startProcessing(id);
+      await api.startProcessing(id, speakers);
       setRecordingId(null);
       setActiveId(id);
+      setActiveSpeakers(speakers);
+      // A headcount belongs to one meeting; carrying it into the next would
+      // force the wrong number of speakers onto a meeting nobody set it for.
+      setSpeakers(null);
       setRunToken((n) => n + 1);
     } catch (err) {
       setError(api.errorMessage(err));
@@ -93,7 +104,7 @@ export function RecordingPanel({
     if (!activeId) return;
     setProcessError(null);
     try {
-      await api.startProcessing(activeId);
+      await api.startProcessing(activeId, activeSpeakers);
       setRunToken((n) => n + 1);
     } catch (err) {
       setProcessError(api.errorMessage(err));
@@ -107,8 +118,8 @@ export function RecordingPanel({
           {missingModels.length} component{missingModels.length === 1 ? "" : "s"} needed for
           transcription and minutes {missingModels.length === 1 ? "isn't" : "aren't"} installed
           yet.{" "}
-          <button type="button" className="link" onClick={onOpenSettings}>
-            Install them from Settings
+          <button type="button" className="link" onClick={onOpenSetup}>
+            Finish setting up
           </button>{" "}
           whenever you're ready — recording works either way.
         </Notice>
@@ -163,6 +174,17 @@ export function RecordingPanel({
             disabled={recording || busy}
           />
         </label>
+
+        {/* Left enabled while recording: the headcount is often only known
+            once everyone has arrived, and it is not used until Stop. */}
+        {/* Keyed on the run so the field remounts at Stop — back to "Not
+            sure" rather than a stale "5 or more" for the next meeting. */}
+        <SpeakerCountField
+          key={runToken}
+          value={speakers}
+          onChange={setSpeakers}
+          disabled={busy}
+        />
 
         <div className="recording-status">
           {recording ? (

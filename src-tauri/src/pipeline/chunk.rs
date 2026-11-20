@@ -26,6 +26,11 @@ pub struct Chunk {
 
 impl Chunk {
     /// The text handed to the model: `[seconds] Person N: what they said`.
+    ///
+    /// `s.text` may already be masked — `mom::mask_for_grounding` applies the
+    /// redaction policy to a copy of the transcript *before* chunking, so this
+    /// renders whatever it was given and needs no policy of its own. Do not add
+    /// one here: a second masking point is a second place to forget.
     pub fn render(&self) -> String {
         self.segments
             .iter()
@@ -149,6 +154,7 @@ mod tests {
             end_ms: start_s * 1000 + 4000,
             text: text.to_string(),
             language: None,
+            flags: Vec::new(),
         }
     }
 

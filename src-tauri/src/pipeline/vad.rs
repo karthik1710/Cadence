@@ -37,7 +37,8 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Catalog id of the Silero VAD weights. Optional — see `models_manager`.
+/// Catalog id of the Silero VAD weights. Installed with the required set,
+/// but a run without it still succeeds — see [`is_available`].
 pub const VAD_MODEL_ID: &str = "vad-silero";
 
 const VAD_BINARY: &str = "sherpa-onnx-vad.exe";
@@ -66,12 +67,10 @@ pub struct VadReport {
     pub speech_ratio: f32,
 }
 
-pub fn models_bin(data_dir: &Path) -> PathBuf {
-    paths::models_dir(data_dir).join("bin")
-}
-
+/// `sherpa-onnx-vad.exe` ships with the sherpa-onnx runtime, so it runs from
+/// that runtime's folder.
 pub fn binary_path(data_dir: &Path) -> PathBuf {
-    models_bin(data_dir).join(VAD_BINARY)
+    paths::runtime_binary(data_dir, models_manager::Runtime::Sherpa, VAD_BINARY)
 }
 
 pub fn model_path(data_dir: &Path) -> PathBuf {
@@ -82,7 +81,8 @@ pub fn model_path(data_dir: &Path) -> PathBuf {
 }
 
 /// True when both the sherpa-onnx VAD binary and the Silero weights are
-/// installed. VAD is optional — the pipeline runs without it.
+/// installed. The model is part of the installed set, but the pipeline still
+/// runs without it: a missing file is a skip, never a lost meeting.
 pub fn is_available(data_dir: &Path) -> bool {
     binary_path(data_dir).exists() && model_path(data_dir).exists()
 }

@@ -283,6 +283,17 @@ fn write_u16(data: &[u16], writer: &Arc<Mutex<hound::WavWriter<BufWriter<File>>>
     }
 }
 
+fn create_recording_writer(
+    path: &std::path::Path,
+    spec: hound::WavSpec,
+) -> Result<hound::WavWriter<BufWriter<File>>, String> {
+    // Reserve atomically: duplicate recording requests must never truncate
+    // an earlier recording, even if the destination appeared after validation.
+    let file = File::options().write(true).create_new(true).open(path)
+        .map_err(|e| format!("Could not create a new recording at {}: {e}. Existing recordings are kept; start a new meeting.", path.display()))?;
+    hound::WavWriter::new(BufWriter::new(file), spec).map_err(|e| e.to_string())
+}
+
 /// Runs entirely on its own thread for the lifetime of one recording.
 /// Sends `Ok((sample_rate, channels))` on `ready_tx` once the stream is
 /// live, then blocks until `stop_rx` fires, finalizes the WAV file, and
@@ -362,7 +373,7 @@ fn recording_thread_inner(
         sample_format: hound::SampleFormat::Int,
     };
     eprintln!("[audio] creating WAV writer at {file_path:?} ({spec:?})");
-    let writer = match hound::WavWriter::create(&file_path, spec) {
+    let writer = match create_recording_writer(&file_path, spec) {
         Ok(w) => Arc::new(Mutex::new(w)),
         Err(e) => {
             eprintln!("[audio] WAV writer creation failed: {e}");
@@ -461,12 +472,11 @@ pub fn start_recording(
         return Err("A recording is already in progress".to_string());
     }
 
-    let data_dir = app
+    let app_data = app
         .path()
         .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("meetings")
-        .join(&meeting_id);
+        .map_err(|e| e.to_string())?;
+    let data_dir = crate::storage::meeting_dir(&app_data, &meeting_id)?;
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let file_path = data_dir.join("original.wav");
 
@@ -780,5 +790,36 @@ mod tests {
         let meter = LevelMeter::default();
         meter.observe([32_768u16, 32_768, 32_768].iter().map(|&s| u16_to_unit(s)));
         assert_eq!(meter.peak_linear(), 0.0);
+    }
+
+    #[test]
+    fn duplicate_recording_preserves_the_original_audio() {
+        let path = std::env::temp_dir().join(format!("cadence-recording-{}.wav", unique_test_suffix()));
+        let spec = hound::WavSpec { channels: 1, sample_rate: 16_000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let mut writer = create_recording_writer(&path, spec).unwrap();
+        writer.write_sample(1234i16).unwrap();
+        writer.finalize().unwrap();
+        let original = std::fs::read(&path).unwrap();
+        assert!(create_recording_writer(&path, spec).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        assert_eq!(reader.samples::<i16>().next().unwrap().unwrap(), 1234);
+        drop(reader);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn recording_refuses_an_existing_non_audio_file() {
+        let path = std::env::temp_dir().join(format!("cadence-recording-sentinel-{}.wav", unique_test_suffix()));
+        std::fs::write(&path, b"keep this file").unwrap();
+        let spec = hound::WavSpec { channels: 1, sample_rate: 16_000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let error = create_recording_writer(&path, spec).err().unwrap();
+        assert!(error.contains("Existing recordings are kept"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep this file");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    fn unique_test_suffix() -> String {
+        format!("{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())
     }
 }

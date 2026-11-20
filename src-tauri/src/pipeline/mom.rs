@@ -11,11 +11,23 @@
 //! and then [`ground`] rewrites the parts it is not allowed to invent —
 //! participants come from the transcript, timestamps outside the meeting are
 //! dropped rather than kept, and an owner who never spoke becomes `null`.
+//!
+//! The second design point, and the reason [`mask_for_grounding`] exists: when
+//! the redaction mode hides text, the model is never shown the words in the
+//! first place. Minutes are the artefact that gets circulated, and an evidence
+//! quote is transcript text that the model lifted verbatim — so masking it at
+//! render time only, the way the transcript view does, would be too late for
+//! anything the model chose to repeat back. Masking the *input* means every
+//! quote downstream is already masked by construction, and no future addition
+//! to this file can bypass it by forgetting to thread a mode through.
 
 use crate::pipeline::chunk::{self, Chunk};
 use crate::pipeline::llm::{extract_json, LlmProvider};
-use crate::pipeline::models::{ActionItem, ChunkExtraction, Evidenced, Mom, MomMeta, Transcript};
+use crate::pipeline::models::{
+    ActionItem, ChunkExtraction, Evidenced, Mom, MomMeta, Transcript, TranscriptSegment,
+};
 use crate::pipeline::prompts;
+use crate::pipeline::redact::{self, RedactionMode};
 use std::path::Path;
 
 const EXTRACTION_SYSTEM: &str =
@@ -39,8 +51,14 @@ pub struct MomRequest<'a> {
     pub transcript: &'a Transcript,
     pub title: &'a str,
     pub language: &'a str,
-    /// App data dir, for prompt overrides. `None` uses the embedded prompts.
+    /// App data dir, for prompt overrides and the redaction lexicon. `None`
+    /// uses the embedded prompts and the built-in lexicon.
     pub data_dir: Option<&'a Path>,
+    /// The policy the *input* to the model is rendered under. Only `mask` and
+    /// `redact` change anything here — `flag` is a highlight in the UI and a
+    /// prompt has nowhere to put one, so it reaches the model verbatim, exactly
+    /// as it reaches the transcript view.
+    pub redaction: RedactionMode,
 }
 
 /// Runs the full MoM pipeline. `on_progress` receives a stage name and a
@@ -60,11 +78,16 @@ pub fn generate(
         return Err("the transcript is empty, so there is nothing to summarise".to_string());
     }
 
-    let chunks = chunk::chunk_transcript(
-        &request.transcript.segments,
-        budget_chars,
-        CHUNK_OVERLAP_TURNS,
-    );
+    // One choke point, before anything else reads the text. Everything
+    // downstream — the chunks, the extracted facts, the evidence quotes in the
+    // finished minutes — is built from `grounding`, so it is masked already.
+    // `request.transcript` is still the source of truth for what is *about* the
+    // meeting: labels, timestamps and durations are identical in both copies,
+    // and `ground` below deliberately reads the original.
+    let masked = mask_for_grounding(request);
+    let grounding: &Transcript = masked.as_ref().unwrap_or(request.transcript);
+
+    let chunks = chunk::chunk_transcript(&grounding.segments, budget_chars, CHUNK_OVERLAP_TURNS);
     let extraction_template = prompts::load(request.data_dir, prompts::EXTRACTION_VERSION)?;
 
     on_progress("EXTRACTING", 65);
@@ -157,10 +180,16 @@ The transcript itself is saved and unaffected.",
         extraction_prompt: prompts::EXTRACTION_VERSION.to_string(),
         synthesis_prompt: prompts::SYNTHESIS_VERSION.to_string(),
         language: request.language.to_string(),
+        // The policy that was in force for this run, not whether it happened
+        // to hide anything: `off` and `flag` both mean the model read the
+        // transcript verbatim, and recording which of the two was asked for
+        // says more than a "was it masked" flag could.
+        redaction_mode: request.redaction.as_str().to_string(),
         chunk_count: chunks.len(),
         generated_at_ms: now_ms(),
         repaired,
         duration_ms: now_ms() - started_ms,
+        failed_chunks,
     });
 
     if failed_chunks > 0 {
@@ -171,6 +200,83 @@ The transcript itself is saved and unaffected.",
     }
 
     Ok(mom)
+}
+
+/// A copy of the transcript with flagged spans hidden, or `None` when the mode
+/// does not hide text and the original can be used as-is.
+///
+/// **This rescans rather than trusting the flags already on the transcript**,
+/// and then unions the two flag sets — the same call `export.rs`'s [`Redactor`]
+/// makes, for a stronger version of the same reason. Stored flags were written
+/// by whichever scan last ran, and the gap here is wider than an export's:
+/// `run_redaction` returns early in `off` mode, so a meeting processed with
+/// redaction off carries *no* flags at all. A user who then switches to `mask`
+/// and hits "Regenerate minutes" — which is exactly the sequence that switch
+/// invites — would otherwise hand the model the unmasked transcript and get
+/// unmasked minutes back, with nothing to show anything had failed. Rescanning
+/// also picks up the user's own lexicon edits, and reads a `transcript.json`
+/// written before flags existed at all. `redact::apply` skips overlapping
+/// spans, so a span found by both passes is masked once.
+///
+/// [`Redactor`]: crate::export::Redactor
+///
+/// **This is the one place in the pipeline that fails closed.** Everywhere else
+/// the rule is never to lose a meeting, so a stage that cannot run degrades to
+/// doing less. Here "doing less" means printing the words into a document that
+/// gets circulated, which is unrecoverable in the way a missing transcript is
+/// not — the file has already left. So every fallback on this path errs towards
+/// masking more: a `data_dir` that cannot supply a lexicon falls back to the
+/// built-in list rather than to no masking, and an empty lexicon (every file
+/// missing or unparseable) does the same rather than being taken at its word.
+/// Note the asymmetry with `Redactor::none()`, which renders verbatim for a
+/// caller with no settings — an export has an explicit human behind it, and
+/// this runs unattended at the end of a pipeline.
+///
+/// Nothing here can fail hard: `Lexicon::load` logs and skips an unreadable
+/// override, and `redact::apply` clamps out-of-range offsets. A failure to mask
+/// therefore cannot cost the minutes, only mask more than strictly needed.
+fn mask_for_grounding(request: &MomRequest) -> Option<Transcript> {
+    if !request.redaction.hides_text() {
+        return None;
+    }
+
+    let (mut lexicon, options) = match request.data_dir {
+        Some(dir) => (
+            redact::Lexicon::load(dir),
+            redact::ScanOptions {
+                fuzzy: crate::settings::load(dir).redaction_fuzzy,
+            },
+        ),
+        // Fuzzy stays off without settings to read: it is the half that
+        // guesses, and over-masking the input degrades the minutes.
+        None => (redact::Lexicon::builtin(), redact::ScanOptions::default()),
+    };
+    if lexicon.is_empty() {
+        eprintln!("[mom] the redaction lexicon loaded empty; falling back to the built-in list");
+        lexicon = redact::Lexicon::builtin();
+    }
+
+    Some(Transcript {
+        meeting_id: request.transcript.meeting_id.clone(),
+        segments: request
+            .transcript
+            .segments
+            .iter()
+            .map(|segment| {
+                let mut flags = segment.flags.clone();
+                flags.extend(redact::scan(&segment.text, &lexicon, &options));
+                TranscriptSegment {
+                    text: redact::apply(&segment.text, &flags, request.redaction),
+                    // Kept only so the copy stays a well-formed `Transcript`.
+                    // It is never serialized and never leaves this module —
+                    // `Flag::term_id` is the unmasked word, which is why
+                    // `export.rs` has to mask it before writing a file.
+                    flags,
+                    ..segment.clone()
+                }
+            })
+            .collect(),
+    })
 }
 
 fn extract_chunk(
@@ -575,6 +681,7 @@ mod tests {
                     end_ms: i as i64 * 10_000 + 8_000,
                     text: format!("turn {i} of a meeting about the release schedule"),
                     language: None,
+                    flags: Vec::new(),
                 })
                 .collect(),
         }
@@ -606,6 +713,7 @@ mod tests {
             title: "Release planning",
             language: "English",
             data_dir: None,
+            redaction: RedactionMode::Flag,
         }
     }
 
@@ -621,8 +729,8 @@ mod tests {
         assert!(mom.validate().is_ok());
         assert_eq!(mom.decisions.len(), 1);
         let meta = mom.meta.as_ref().unwrap();
-        assert_eq!(meta.extraction_prompt, "extraction_v1");
-        assert_eq!(meta.synthesis_prompt, "synthesis_v1");
+        assert_eq!(meta.extraction_prompt, "extraction_v2");
+        assert_eq!(meta.synthesis_prompt, "synthesis_v2");
         assert_eq!(meta.model, "mock");
     }
 
@@ -701,6 +809,245 @@ mod tests {
         assert!(seen.iter().any(|(stage, _)| stage == "EXTRACTING"));
         for pair in seen.windows(2) {
             assert!(pair[1].1 >= pair[0].1, "progress went backwards: {seen:?}");
+        }
+    }
+
+    // ------------------------------------------------------- redaction
+
+    /// `MockLlm` with a tap on it. What reaches the model is the whole point of
+    /// masking the grounding input, and `MockLlm` discards the prompt, so these
+    /// tests wrap it rather than assert on the minutes it happens to return.
+    struct RecordingLlm {
+        inner: MockLlm,
+        prompts: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl RecordingLlm {
+        fn new(responses: Vec<String>, fallback: &str) -> Self {
+            Self {
+                inner: MockLlm::new(responses, fallback),
+                prompts: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        /// Everything the model was ever shown, as one string to search.
+        fn seen(&self) -> String {
+            self.prompts.lock().unwrap().join("\n---\n")
+        }
+    }
+
+    impl LlmProvider for RecordingLlm {
+        fn describe(&self) -> crate::pipeline::llm::LlmDescriptor {
+            self.inner.describe()
+        }
+
+        fn complete_json(
+            &self,
+            system: &str,
+            user: &str,
+            max_tokens: usize,
+        ) -> Result<String, String> {
+            self.prompts.lock().unwrap().push(user.to_string());
+            self.inner.complete_json(system, user, max_tokens)
+        }
+    }
+
+    /// A term nobody's lexicon contains, so the flag has to come from where the
+    /// test put it. Real profanity in a fixture would tie these assertions to
+    /// the shipped policy file, which `redact.rs`'s own tests deliberately
+    /// avoid doing.
+    const RUDE: &str = "blarg";
+
+    /// One turn containing `RUDE`, already flagged the way `run_redaction`
+    /// would have flagged it.
+    fn flagged_transcript() -> Transcript {
+        let text = format!("the schedule is total {RUDE}, honestly");
+        let start = text.chars().count() - "blarg, honestly".chars().count();
+        Transcript {
+            meeting_id: "flagged".to_string(),
+            segments: vec![TranscriptSegment {
+                speaker: "SPEAKER_00".to_string(),
+                speaker_label: "Person 1".to_string(),
+                start_ms: 0,
+                end_ms: 8_000,
+                text,
+                language: None,
+                flags: vec![redact::Flag {
+                    start_char: start,
+                    end_char: start + RUDE.chars().count(),
+                    term_id: RUDE.to_string(),
+                    category: redact::Category::Insult,
+                    severity: redact::Severity::Strong,
+                    method: redact::MatchMethod::Exact,
+                }],
+            }],
+        }
+    }
+
+    fn run_with_mode(transcript: &Transcript, mode: RedactionMode) -> RecordingLlm {
+        let llm = RecordingLlm::new(vec![EXTRACTION_JSON.to_string()], SYNTHESIS_JSON);
+        let request = MomRequest {
+            redaction: mode,
+            ..request(transcript)
+        };
+        let _ = generate(&llm, &request, &|_, _| {});
+        llm
+    }
+
+    #[test]
+    fn a_mode_that_hides_text_masks_the_transcript_before_the_model_sees_it() {
+        let transcript = flagged_transcript();
+        let seen = run_with_mode(&transcript, RedactionMode::Mask).seen();
+        assert!(
+            !seen.contains(RUDE),
+            "the model was shown the flagged word: {seen}"
+        );
+        assert!(seen.contains("b****"), "expected a mask in: {seen}");
+    }
+
+    #[test]
+    fn redact_mode_expunges_the_word_rather_than_masking_its_length() {
+        let transcript = flagged_transcript();
+        let seen = run_with_mode(&transcript, RedactionMode::Redact).seen();
+        assert!(!seen.contains(RUDE));
+        assert!(seen.contains("[expunged]"), "expected an expunge in: {seen}");
+    }
+
+    #[test]
+    fn off_and_flag_modes_show_the_model_what_was_actually_said() {
+        // `flag` decorates in the UI and hides nothing; summarising from a
+        // masked transcript when the user asked for neither would quietly
+        // degrade the minutes for no policy reason.
+        let transcript = flagged_transcript();
+        for mode in [RedactionMode::Off, RedactionMode::Flag] {
+            let seen = run_with_mode(&transcript, mode).seen();
+            assert!(
+                seen.contains(RUDE),
+                "{} should not have masked anything: {seen}",
+                mode.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn masking_the_input_never_touches_the_callers_transcript() {
+        // The raw-artifact rule: `transcript.json` holds what was said, and
+        // this path takes a copy rather than editing in place.
+        let transcript = flagged_transcript();
+        let before = transcript.segments[0].text.clone();
+        let _ = run_with_mode(&transcript, RedactionMode::Redact);
+        assert_eq!(transcript.segments[0].text, before);
+        assert_eq!(transcript.segments[0].flags.len(), 1);
+    }
+
+    #[test]
+    fn a_term_the_current_lexicon_knows_is_masked_even_with_no_stored_flag() {
+        // The `off`-then-`mask`-then-regenerate sequence: the transcript on
+        // disk carries no flags at all, so trusting them would leak the word.
+        let dir = std::env::temp_dir().join("cadence-mom-rescan");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("lexicon")).unwrap();
+        std::fs::write(
+            dir.join("lexicon").join("en.txt"),
+            "quuxlorem | insult | strong\n",
+        )
+        .unwrap();
+
+        let transcript = Transcript {
+            meeting_id: "rescan".to_string(),
+            segments: vec![TranscriptSegment {
+                speaker: "SPEAKER_00".to_string(),
+                speaker_label: "Person 1".to_string(),
+                start_ms: 0,
+                end_ms: 8_000,
+                text: "the vendor call was quuxlorem from start to finish".to_string(),
+                language: None,
+                // Deliberately empty: this is what `off` mode leaves behind.
+                flags: Vec::new(),
+            }],
+        };
+        let llm = RecordingLlm::new(vec![EXTRACTION_JSON.to_string()], SYNTHESIS_JSON);
+        let _ = generate(
+            &llm,
+            &MomRequest {
+                transcript: &transcript,
+                title: "Vendor call",
+                language: "English",
+                data_dir: Some(&dir),
+                redaction: RedactionMode::Mask,
+            },
+            &|_, _| {},
+        );
+        let seen = llm.seen();
+        assert!(!seen.contains("quuxlorem"), "rescan missed the term: {seen}");
+        assert!(seen.contains("q********"), "expected a mask in: {seen}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stored_flag_and_a_fresh_one_over_the_same_span_mask_it_once() {
+        // Both passes find `blarg`, and `redact::apply` skips the overlap —
+        // without that the union would double-mask and corrupt the turn.
+        let dir = std::env::temp_dir().join("cadence-mom-union");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("lexicon")).unwrap();
+        std::fs::write(dir.join("lexicon").join("en.txt"), "blarg | insult | strong\n").unwrap();
+
+        let transcript = flagged_transcript();
+        let llm = RecordingLlm::new(vec![EXTRACTION_JSON.to_string()], SYNTHESIS_JSON);
+        let _ = generate(
+            &llm,
+            &MomRequest {
+                data_dir: Some(&dir),
+                redaction: RedactionMode::Mask,
+                ..request(&transcript)
+            },
+            &|_, _| {},
+        );
+        let seen = llm.seen();
+        assert!(seen.contains("total b****, honestly"), "got: {seen}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_prompt_versions_recorded_in_the_meta_are_the_ones_that_ran() {
+        let transcript = transcript(4);
+        let llm = MockLlm::new(
+            vec![EXTRACTION_JSON.to_string(), SYNTHESIS_JSON.to_string()],
+            SYNTHESIS_JSON,
+        );
+        let mom = generate(&llm, &request(&transcript), &|_, _| {}).unwrap();
+        let meta = mom.meta.unwrap();
+        assert_eq!(meta.extraction_prompt, prompts::EXTRACTION_VERSION);
+        assert_eq!(meta.synthesis_prompt, prompts::SYNTHESIS_VERSION);
+        // Both templates must still resolve under the names just recorded, or
+        // "Regenerate minutes" could not reproduce this run.
+        assert!(prompts::load(None, &meta.extraction_prompt).is_ok());
+        assert!(prompts::load(None, &meta.synthesis_prompt).is_ok());
+    }
+
+    #[test]
+    fn the_redaction_mode_recorded_in_the_meta_is_the_one_the_model_ran_under() {
+        // Two runs of the same meeting under different policies produce
+        // different minutes from identical inputs; the meta is the only thing
+        // that tells them apart afterwards.
+        let transcript = flagged_transcript();
+        for mode in [
+            RedactionMode::Off,
+            RedactionMode::Flag,
+            RedactionMode::Mask,
+            RedactionMode::Redact,
+        ] {
+            let llm = MockLlm::new(
+                vec![EXTRACTION_JSON.to_string(), SYNTHESIS_JSON.to_string()],
+                SYNTHESIS_JSON,
+            );
+            let request = MomRequest {
+                redaction: mode,
+                ..request(&transcript)
+            };
+            let mom = generate(&llm, &request, &|_, _| {}).unwrap();
+            assert_eq!(mom.meta.unwrap().redaction_mode, mode.as_str());
         }
     }
 

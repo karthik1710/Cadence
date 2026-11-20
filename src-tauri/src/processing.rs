@@ -56,7 +56,7 @@ pub fn finalize_recording(
     channels: u16,
 ) -> Result<MeetingMetadata, String> {
     let data_dir = app_data_dir(&app)?;
-    let wav = storage::meeting_dir(&data_dir, &meeting_id).join("original.wav");
+    let wav = storage::meeting_dir(&data_dir, &meeting_id)?.join("original.wav");
     let duration_ms = storage::wav_duration_ms(&wav).unwrap_or(0);
 
     storage::update_metadata(&data_dir, &meeting_id, |meta| {
@@ -71,14 +71,23 @@ pub fn finalize_recording(
 
 /// Starts the local pipeline for an already-recorded meeting and returns
 /// immediately; the UI polls `get_processing_status`.
+///
+/// `expected_speakers` is the organiser's optional "how many people spoke?"
+/// answer for this run — `None` is "Not sure" and leaves speaker clustering
+/// automatic. It is always explicit: every caller passes what is on screen
+/// (which the UI initialises from the meeting's saved choice), and it is saved
+/// to the meeting's `processing_options.json` so the next re-run starts from
+/// it. Validated before anything is written or started.
 #[tauri::command]
 pub fn start_processing(
     app: AppHandle,
     state: State<ProcessingState>,
     meeting_id: String,
+    expected_speakers: Option<u32>,
 ) -> Result<(), String> {
+    let expected_speakers = pipeline::validate_expected_speakers(expected_speakers)?;
     let data_dir = app_data_dir(&app)?;
-    let dir = storage::meeting_dir(&data_dir, &meeting_id);
+    let dir = storage::meeting_dir(&data_dir, &meeting_id)?;
     let original = dir.join("original.wav");
     if !original.exists() {
         return Err(format!(
@@ -87,12 +96,22 @@ pub fn start_processing(
         ));
     }
 
+    // Saved before anything else can fail — a missing model included — so the
+    // organiser's answer survives a run that never starts, fails, or is
+    // interrupted, and the retry does not quietly fall back to automatic.
+    let mut options = storage::read_processing_options(&data_dir, &meeting_id);
+    options.expected_speakers = expected_speakers;
+    storage::write_processing_options(&data_dir, &meeting_id, &options)?;
+
     let user_settings = settings::load(&data_dir);
     let host = HostInfo::detect();
     // Resolved up front so a missing model is reported to the user immediately
     // rather than after processing appears to start.
     let paths = ModelPaths::resolve(&app, &user_settings)?;
-    let config = PipelineConfig::from_settings(&user_settings, &host);
+    let config = PipelineConfig {
+        expected_speakers,
+        ..PipelineConfig::from_settings(&user_settings, &host)
+    };
     let title = storage::read_metadata(&data_dir, &meeting_id)
         .map(|m| m.display_title())
         .unwrap_or_else(|_| "Untitled meeting".to_string());
@@ -179,7 +198,7 @@ pub fn regenerate_mom(
     meeting_id: String,
 ) -> Result<(), String> {
     let data_dir = app_data_dir(&app)?;
-    let dir = storage::meeting_dir(&data_dir, &meeting_id);
+    let dir = storage::meeting_dir(&data_dir, &meeting_id)?;
     if !dir.join("transcript.json").exists() {
         return Err(
             "This meeting has no transcript yet. Run processing first.".to_string()

@@ -1,0 +1,95 @@
+{
+  "about": [
+    "Baseline regression clips for `bench_cli baseline` (src-tauri/src/bin/bench_cli/bench/baseline.rs).",
+    "Audio and captions are copyrighted YouTube content: scripts/fetch-baseline-clips.ps1 caches them under bench-runs/baseline-cache/ (gitignored). Never commit them.",
+    "tolerance.wer_pp gates WER relative to expected.wer_pct (absolute percentage points, either way). speakers_min/max, max_repeat_run and max_repeated_segments are absolute bounds. RTF and timings are machine-dependent and never gated.",
+    "expected is rewritten by `bench_cli baseline --update`. Run that only when a change is an intentional improvement.",
+    "known_failures (optional) lists gated metrics already known to fail on a clip: wer, speakers, longest_repeat_run, repeated_segments, minutes. They report KNOWN without failing the run, and FIXED once they pass, at which point remove the entry. Never widen a tolerance to hide a failure; list it here instead.",
+    "caption_language (optional, default English) is the language of the caption text, e.g. ta. caption_track must be a human-made subtitle track (yt-dlp --write-subs), never YouTube's automatic captions."
+  ],
+  "clips": [
+    {
+      "id": "rXRqgTI7LgU",
+      "title": "KIII 3 News: Alice city council holds tense meeting",
+      "url": "https://www.youtube.com/watch?v=rXRqgTI7LgU",
+      "caption_track": "en-JkeT_87f4cc",
+      "duration_s": 135.0,
+      "what_it_tests": "Multi-speaker real council-room audio (reverberant room mics, distant talkers) cut with broadcast studio and reporter narration: diarization over-splitting and STT on far-field speech.",
+      "caption_quality": "Broadcast live captions: ALL CAPS, non-verbatim (paraphrased, words dropped), cues not duplicated. WER here is an upper bound on the real error rate; use it for regressions, not as an absolute accuracy figure.",
+      "tolerance": {
+        "wer_pp": 2.0,
+        "speakers_min": 2,
+        "speakers_max": 12,
+        "max_repeat_run": 4,
+        "max_repeated_segments": 1
+      },
+      "expected": {
+        "wer_pct": 16.67,
+        "substitutions": 27,
+        "deletions": 7,
+        "insertions": 23,
+        "reference_words": 342,
+        "words": 358,
+        "speakers": 10,
+        "longest_repeat_run": 2,
+        "repeated_segments": 0,
+        "rtf": 0.8,
+        "total_s": 108.4,
+        "recorded": {
+          "date": "2026-10-05",
+          "git_head": "9f6502494264",
+          "total_ram_mb": 16008,
+          "logical_cores": 16,
+          "stt_model": "whisper-small",
+          "stt_language": "code-switched",
+          "stt_threads": 16,
+          "diarization_threads": 8,
+          "how": "hand-measured with bench_cli compare --variants raw,shipped --reference <captions> (shipped row; raw front end gave 16.1% WER, 9 speakers); working tree had uncommitted edits"
+        }
+      }
+    },
+    {
+      "id": "R1vskiVDwl4",
+      "title": "TED: Celeste Headlee, 10 ways to have a better conversation",
+      "url": "https://www.youtube.com/watch?v=R1vskiVDwl4",
+      "caption_track": "en",
+      "duration_s": 704.0,
+      "what_it_tests": "One practised speaker on a stage mic for ~12 minutes, with audience laughter and applause: long-form STT accuracy, whisper looping on a long recording, and diarization over-splitting a single talker (the known failure mode the speaker bound exists to catch).",
+      "caption_quality": "Professional TED captions, close to verbatim. Sound annotations such as (Laughter) and (Applause) are dropped by the VTT parser.",
+      "tolerance": {
+        "wer_pp": 2.0,
+        "speakers_min": 1,
+        "speakers_max": 2,
+        "max_repeat_run": 4,
+        "max_repeated_segments": 2
+      },
+      "known_failures": [
+        "speakers"
+      ],
+      "expected": {
+        "wer_pct": 2.77,
+        "substitutions": 20,
+        "deletions": 8,
+        "insertions": 26,
+        "reference_words": 1950,
+        "words": 1964,
+        "speakers": 8,
+        "longest_repeat_run": 2,
+        "repeated_segments": 0,
+        "rtf": 1.19,
+        "total_s": 832.6,
+        "recorded": {
+          "date": "2026-10-06",
+          "git_head": "9f6502494264",
+          "total_ram_mb": 16008,
+          "logical_cores": 16,
+          "stt_model": "whisper-small",
+          "stt_language": "code-switched",
+          "stt_threads": 16,
+          "diarization_threads": 8,
+          "how": "copied by hand from bench-runs/20261006-030726-baseline (bench_cli baseline, no --with-mom; i7-1260P) without re-running; WER 54/1950, longest repeat 2x \"i came to realize\"; stages preprocess 93.7s, denoise 91.7s, VAD 7.8s, diarization 143.3s, STT 587.1s, align 0.0s; working tree had uncommitted edits (align island fix, hybrid LLM thread rule, retired-model detection). speakers=8 is a KNOWN FAILURE against the 1-2 bound: diarization over-splits one talker (roadmap risks 12/18). The bound stays as the target; do not widen it."
+        }
+      }
+    }
+  ]
+}

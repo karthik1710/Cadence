@@ -10,6 +10,8 @@
 //! scale the live meter used to expose — a linear meter reads "half" at
 //! -6 dBFS and makes a badly quiet recording look merely quiet.
 
+use crate::pipeline::noise_class::{self, NoiseReport};
+use crate::pipeline::spectrum;
 use hound::{SampleFormat, WavReader};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -37,6 +39,40 @@ const DC_OFFSET_LIMIT: f32 = 0.01;
 const MOSTLY_SILENT_PERCENT: f32 = 80.0;
 const MIN_USEFUL_SAMPLE_RATE: u32 = 16_000;
 
+/// The telephone band, and near enough the band a speech recogniser actually
+/// works in. Below it is room, above it is sibilance and hiss.
+const SPEECH_BAND_LO_HZ: f32 = 300.0;
+const SPEECH_BAND_HI_HZ: f32 = 3_400.0;
+
+/// Analysis frame for the speech-band SNR. 1024 samples is 64 ms at 16 kHz,
+/// giving 15.6 Hz bins — plenty to resolve a 300 Hz band edge, and short
+/// enough that a frame is either speech or pause rather than half of each.
+const SNR_FRAME: usize = 1_024;
+
+/// Cap on frames per spectrum. Two spectra are averaged (the room and the
+/// speech), so this is at most 600 FFTs for a recording of any length —
+/// a 60-minute meeting is ~57 million samples and must not cost 56,000 of
+/// them.
+const MAX_SNR_FRAMES: usize = 300;
+
+/// Frames within this much of the 90th-percentile level are treated as
+/// speech when building the speech spectrum.
+const SPEECH_MARGIN_DB: f32 = 3.0;
+
+/// Speech-band SNR at or above which nothing is deducted from the score. Below
+/// roughly this, word error rate starts climbing on every ASR system there is.
+const GOOD_SPEECH_SNR_DB: f32 = 20.0;
+
+/// The level strip the UI draws. Fixed so a 10-minute meeting and a 3-hour one
+/// render identically — the strip is a shape, not a ruler, and 120 buckets is
+/// about as fine as a few hundred pixels can show.
+pub const MAX_TIMELINE_BUCKETS: usize = 120;
+
+/// Below this, a bucket stops describing a passage of the meeting and starts
+/// describing a syllable, so a short recording gets fewer, wider buckets
+/// rather than 120 meaningless ones.
+const MIN_TIMELINE_BUCKET_MS: i64 = 250;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioProfile {
     pub duration_ms: i64,
@@ -47,13 +83,53 @@ pub struct AudioProfile {
     /// 10th percentile of frame RMS — a far better estimate than the global
     /// minimum, which any single dropped sample drives to digital silence.
     pub noise_floor_dbfs: f32,
+    /// 90th percentile of frame RMS — the level of the recording *while
+    /// someone was talking*, which is the number the overall RMS is not: that
+    /// one is dragged down by every pause in the meeting.
+    pub speech_dbfs: f32,
     pub estimated_snr_db: f32,
+    /// `peak_dbfs - rms_dbfs`. Wide means the loud moments tower over the
+    /// quiet ones — one person close to the microphone and the rest of the
+    /// table far from it — which is what the compressor exists to narrow.
+    pub crest_factor_db: f32,
+    /// Speech-to-noise measured **only across 300–3400 Hz**, which predicts
+    /// transcription accuracy far better than the broadband
+    /// [`AudioProfile::estimated_snr_db`] beside it.
+    ///
+    /// A recording can have an excellent broadband SNR and still be unusable:
+    /// if the energy separating "speech" from "room" is all air-conditioning
+    /// rumble at 40 Hz or preamp hiss at 12 kHz, the broadband number is large
+    /// and the recogniser — which only ever looks at the voice band — sees
+    /// nothing but noise. Restricting the measurement to the band the model
+    /// actually reads is what makes it honest.
+    pub speech_band_snr_db: f32,
     pub clipped_samples: u64,
     pub clipped_percent: f32,
     pub silence_percent: f32,
     pub dc_offset: f32,
+    /// What the background noise actually *is*, and what to do about it.
+    pub noise: NoiseReport,
+    /// 0..=100. See [`quality_score`] for exactly what is deducted and why.
+    pub quality_score: u8,
+    /// "excellent" | "good" | "fair" | "poor" — [`quality_score`] bucketed,
+    /// so the UI never has to invent its own thresholds.
+    pub quality_grade: String,
+    /// At most [`MAX_TIMELINE_BUCKETS`] evenly spread buckets, so the UI can
+    /// draw a level strip for a recording of any length the same way.
+    pub timeline: Vec<ProfileFrame>,
     /// Plain-language advice for the UI. Empty means nothing to report.
     pub warnings: Vec<String>,
+}
+
+/// One bucket of the level strip. Deliberately three numbers and a timestamp:
+/// enough to draw a waveform-ish overview and to mark where the clipping was,
+/// small enough that 120 of them cost nothing to serialise.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProfileFrame {
+    pub start_ms: i64,
+    pub rms_dbfs: f32,
+    pub peak_dbfs: f32,
+    pub clipped_percent: f32,
 }
 
 impl AudioProfile {
@@ -121,6 +197,185 @@ fn floor_and_speech(frame_dbfs: &mut Vec<f32>) -> (f32, f32) {
     (percentile(frame_dbfs, 0.10), percentile(frame_dbfs, 0.90))
 }
 
+/// Speech-to-noise across 300–3400 Hz only.
+///
+/// Two averaged spectra are compared: one over the frames that sit at the
+/// noise floor (the room between words) and one over the frames near the
+/// speech level. Both are capped at [`MAX_SNR_FRAMES`] and strided across the
+/// whole recording by [`spectrum::average_spectrum`], so the cost is a fixed
+/// number of FFTs whether this is a two-minute stand-up or a three-hour
+/// workshop.
+///
+/// Every failure is a `0.0`, never an error: no separation between floor and
+/// speech, no qualifying frames, no energy in the band. A profiling stage that
+/// cannot run reports less; it does not cost the user their recording.
+fn speech_band_snr(
+    samples: &[f32],
+    sample_rate: u32,
+    noise_floor_dbfs: f32,
+    speech_dbfs: f32,
+) -> f32 {
+    if sample_rate == 0 || samples.len() < SNR_FRAME * 2 {
+        return 0.0;
+    }
+    let quiet_ceiling = dbfs_to_amplitude(noise_floor_dbfs + SILENCE_MARGIN_DB);
+    let loud_floor = dbfs_to_amplitude(speech_dbfs - SPEECH_MARGIN_DB);
+    if loud_floor <= quiet_ceiling {
+        // Silence, or a recording with no dynamic range at all: there are no
+        // two populations of frames to compare.
+        return 0.0;
+    }
+
+    let room = spectrum::average_spectrum(samples, sample_rate, SNR_FRAME, MAX_SNR_FRAMES, |_, e| {
+        e <= quiet_ceiling
+    });
+    let speech =
+        spectrum::average_spectrum(samples, sample_rate, SNR_FRAME, MAX_SNR_FRAMES, |_, e| {
+            e >= loud_floor
+        });
+    if room.frames == 0 || speech.frames == 0 {
+        return 0.0;
+    }
+
+    let room_band = room.band_energy(SPEECH_BAND_LO_HZ, SPEECH_BAND_HI_HZ);
+    let speech_band = speech.band_energy(SPEECH_BAND_LO_HZ, SPEECH_BAND_HI_HZ);
+    if room_band <= 0.0 || speech_band <= 0.0 {
+        return 0.0;
+    }
+    // Strictly this is (speech+noise)/noise rather than speech/noise — the
+    // speech frames contain the room too. At the levels that matter the
+    // difference is under a dB, and erring high here is the safe direction: it
+    // never invents a problem that is not there.
+    (20.0 * (speech_band / room_band).log10()).max(0.0)
+}
+
+/// The level strip: at most [`MAX_TIMELINE_BUCKETS`] evenly spread buckets.
+///
+/// Bucket boundaries are computed from the sample index rather than
+/// accumulated, so rounding cannot drift across a long recording and the last
+/// bucket always ends exactly at the end of the audio.
+fn build_timeline(
+    samples: &[f32],
+    sample_rate: u32,
+    channels: u16,
+    duration_ms: i64,
+) -> Vec<ProfileFrame> {
+    let channels = channels.max(1) as usize;
+    let total_frames = samples.len() / channels;
+    if total_frames == 0 || sample_rate == 0 {
+        return Vec::new();
+    }
+    let by_duration = (duration_ms / MIN_TIMELINE_BUCKET_MS).max(1) as usize;
+    let buckets = by_duration.min(MAX_TIMELINE_BUCKETS).min(total_frames);
+
+    let mut out = Vec::with_capacity(buckets);
+    for index in 0..buckets {
+        let start = index * total_frames / buckets;
+        let end = ((index + 1) * total_frames / buckets)
+            .max(start + 1)
+            .min(total_frames);
+        let slice = &samples[start * channels..end * channels];
+
+        let mut peak = 0f32;
+        let mut clipped = 0usize;
+        for &s in slice {
+            let a = s.abs();
+            if a > peak {
+                peak = a;
+            }
+            if a >= CLIP_THRESHOLD {
+                clipped += 1;
+            }
+        }
+        out.push(ProfileFrame {
+            start_ms: (start as i64 * 1000) / sample_rate as i64,
+            rms_dbfs: amplitude_to_dbfs(rms(slice)),
+            peak_dbfs: amplitude_to_dbfs(peak),
+            clipped_percent: if slice.is_empty() {
+                0.0
+            } else {
+                (clipped as f32 / slice.len() as f32) * 100.0
+            },
+        });
+    }
+    out
+}
+
+/// A single 0..=100 number for "will this recording transcribe well".
+///
+/// It starts at 100 and *deducts*, from measurements that actually predict
+/// transcription accuracy rather than from anything that merely sounds
+/// technical. Every deduction is listed here so the number is auditable
+/// instead of magic:
+///
+/// | deduction | when | at most |
+/// |---|---|---|
+/// | mostly silence | more than 80% of frames sit at the noise floor | 40 |
+/// | clipping | above 0.1% of samples at full scale, 18 points per further % | 35 |
+/// | speech-band SNR | below 20 dB, 1.5 points per dB short | 30 |
+/// | quiet | peak below -30 dBFS, 1.25 points per dB short | 25 |
+/// | named noise | 10 points per finding, scaled by its confidence | 25 |
+/// | sample rate | below 16 kHz | 15 |
+///
+/// The weights follow the failure modes in order of how much they cost a
+/// transcript: a recording that is nearly all silence or badly clipped is
+/// unrecoverable, poor speech-band SNR loses words, a quiet-but-clean
+/// recording mostly survives because the front end normalises it, and a named
+/// noise finding is the mildest because it is advice about the *next* meeting.
+/// An empty recording scores 0 — there is nothing to transcribe.
+///
+/// The total of every deduction exceeds 100 on purpose: a recording with four
+/// serious problems is not meaningfully better than one with five, and the
+/// clamp says so.
+pub fn quality_score(profile: &AudioProfile) -> u8 {
+    if profile.duration_ms == 0 {
+        return 0;
+    }
+    let mut score = 100.0f32;
+
+    if profile.sample_rate < MIN_USEFUL_SAMPLE_RATE {
+        score -= 15.0;
+    }
+    if profile.silence_percent > MOSTLY_SILENT_PERCENT {
+        score -= 40.0;
+    }
+    if profile.clipped_percent > CLIP_PERCENT_LIMIT {
+        score -= ((profile.clipped_percent - CLIP_PERCENT_LIMIT) * 18.0).clamp(0.0, 35.0);
+    }
+    if profile.peak_dbfs < QUIET_PEAK_DBFS {
+        score -= ((QUIET_PEAK_DBFS - profile.peak_dbfs) * 1.25).clamp(0.0, 25.0);
+    }
+    if profile.speech_band_snr_db < GOOD_SPEECH_SNR_DB {
+        score -= ((GOOD_SPEECH_SNR_DB - profile.speech_band_snr_db) * 1.5).clamp(0.0, 30.0);
+    }
+
+    let noise: f32 = profile
+        .noise
+        .findings
+        .iter()
+        .map(|f| 10.0 * f.confidence.clamp(0.0, 1.0))
+        .sum();
+    score -= noise.min(25.0);
+
+    // NaN would survive `clamp` on the wrong side of the comparison, so the
+    // guard is explicit: an unmeasurable recording scores zero, not garbage.
+    if !score.is_finite() {
+        return 0;
+    }
+    score.clamp(0.0, 100.0).round() as u8
+}
+
+/// [`quality_score`] as a word. The bands are wide because the score is an
+/// estimate, and a user reading "72" should not think it means 72 of anything.
+pub fn quality_grade(score: u8) -> &'static str {
+    match score {
+        85..=100 => "excellent",
+        70..=84 => "good",
+        50..=69 => "fair",
+        _ => "poor",
+    }
+}
+
 /// Measures `samples` (mono or interleaved, normalised to -1.0..1.0).
 pub fn analyze(samples: &[f32], sample_rate: u32, channels: u16) -> AudioProfile {
     let frames = if channels > 0 {
@@ -172,21 +427,61 @@ pub fn analyze(samples: &[f32], sample_rate: u32, channels: u16) -> AudioProfile
         (clipped as f64 / samples.len() as f64 * 100.0) as f32
     };
 
+    // The spectral stages assume one channel at `sample_rate`; handing them
+    // an interleaved buffer would describe a signal at twice the rate with
+    // both microphones spliced together. Downmixing costs an allocation, so it
+    // only happens when there is actually more than one channel — which is
+    // never, for anything `audio.rs` wrote.
+    let downmixed: Option<Vec<f32>> = if channels > 1 {
+        let n = channels as usize;
+        Some(
+            samples
+                .chunks(n)
+                .map(|frame| frame.iter().sum::<f32>() / frame.len().max(1) as f32)
+                .collect(),
+        )
+    } else {
+        None
+    };
+    let mono: &[f32] = downmixed.as_deref().unwrap_or(samples);
+
+    let peak_dbfs = amplitude_to_dbfs(peak);
+    let rms_dbfs = amplitude_to_dbfs(overall_rms);
+
     let mut profile = AudioProfile {
         duration_ms,
         sample_rate,
         channels,
-        peak_dbfs: amplitude_to_dbfs(peak),
-        rms_dbfs: amplitude_to_dbfs(overall_rms),
+        peak_dbfs,
+        rms_dbfs,
         noise_floor_dbfs,
+        speech_dbfs,
         estimated_snr_db: (speech_dbfs - noise_floor_dbfs).max(0.0),
+        crest_factor_db: peak_dbfs - rms_dbfs,
+        speech_band_snr_db: speech_band_snr(mono, sample_rate, noise_floor_dbfs, speech_dbfs),
         clipped_samples: clipped,
         clipped_percent,
         silence_percent,
         dc_offset,
+        // `clipped_percent` is handed over rather than recomputed, so the
+        // profile and the classifier can never disagree about the same file.
+        noise: noise_class::classify(mono, sample_rate, clipped_percent),
+        quality_score: 0,
+        quality_grade: String::new(),
+        timeline: build_timeline(samples, sample_rate, channels, duration_ms),
         warnings: Vec::new(),
     };
-    profile.warnings = warnings_for(&profile);
+
+    profile.quality_score = quality_score(&profile);
+    profile.quality_grade = quality_grade(profile.quality_score).to_string();
+
+    // The classifier's advice comes last, after the level and clipping
+    // warnings: those name a problem the user can fix in the Windows sound
+    // panel in ten seconds, and should not be buried under a paragraph about
+    // room acoustics.
+    let mut warnings = warnings_for(&profile);
+    warnings.extend(profile.noise.advice());
+    profile.warnings = warnings;
     profile
 }
 
@@ -284,10 +579,7 @@ fn read_normalised(
 /// Profiles a meeting's untouched recording. `data_dir` is the app data
 /// directory; the recording is `meetings/<id>/original.wav`.
 pub fn profile_meeting(data_dir: &Path, meeting_id: &str) -> Result<AudioProfile, String> {
-    let wav = data_dir
-        .join("meetings")
-        .join(meeting_id)
-        .join("original.wav");
+    let wav = crate::storage::meeting_dir(data_dir, meeting_id)?.join("original.wav");
     if !wav.exists() {
         return Err(format!(
             "No recording found at {}. Record the meeting before checking its audio quality.",
@@ -498,11 +790,123 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Deterministic broadband noise. A fixed seed keeps every assertion below
+    /// reproducible, which a real PRNG would not.
+    fn hiss(n: usize, amplitude: f32) -> Vec<f32> {
+        let mut state = 987_654_321u32;
+        (0..n)
+            .map(|_| {
+                state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                (((state >> 16) as f32 / 32_768.0) - 1.0) * amplitude
+            })
+            .collect()
+    }
+
+    /// Alternating half-second bursts of `freq` over a constant hiss floor —
+    /// the shape of a meeting: talking, pause, talking.
+    fn bursts(sr: u32, seconds: f32, freq: f32, amplitude: f32, floor: f32) -> Vec<f32> {
+        let total = (sr as f32 * seconds) as usize;
+        let mut out = hiss(total, floor);
+        let burst = (sr / 2) as usize;
+        for (i, s) in out.iter_mut().enumerate() {
+            if (i / burst) % 2 == 0 {
+                let t = i as f32 / sr as f32;
+                *s += amplitude * (2.0 * std::f32::consts::PI * freq * t).sin();
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn probe() {
+        let sr = 16_000;
+        let voice = analyze(&bursts(sr, 4.0, 1_000.0, 0.3, 0.003), sr, 1);
+        let rumble = analyze(&bursts(sr, 4.0, 60.0, 0.3, 0.003), sr, 1);
+        println!(
+            "voice: broadband {:.1} band {:.1} score {} grade {} speech {:.1} crest {:.1} findings {:?}",
+            voice.estimated_snr_db, voice.speech_band_snr_db, voice.quality_score,
+            voice.quality_grade, voice.speech_dbfs, voice.crest_factor_db,
+            voice.noise.findings.iter().map(|f| (f.kind, f.confidence)).collect::<Vec<_>>()
+        );
+        println!(
+            "rumble: broadband {:.1} band {:.1} score {} grade {} findings {:?}",
+            rumble.estimated_snr_db, rumble.speech_band_snr_db, rumble.quality_score,
+            rumble.quality_grade,
+            rumble.noise.findings.iter().map(|f| (f.kind, f.confidence)).collect::<Vec<_>>()
+        );
+        let mut clean = tone(sr, 0.4, 800.0, 0.00005);
+        clean.extend(tone(sr, 2.0, 800.0, 0.4));
+        let c = analyze(&clean, sr, 1);
+        println!("clean: band {:.1} score {} grade {} warnings {:?}", c.speech_band_snr_db, c.quality_score, c.quality_grade, c.warnings);
+        let mut bad = hiss(sr as usize * 3, 0.02);
+        for (i, s) in bad.iter_mut().enumerate() {
+            if (i / 8000) % 2 == 0 {
+                let t = i as f32 / sr as f32;
+                *s += 0.03 * (2.0 * std::f32::consts::PI * 300.0 * t).sin();
+            }
+        }
+        let b = analyze(&bad, sr, 1);
+        println!("bad: peak {:.1} band {:.1} score {} grade {} findings {:?}", b.peak_dbfs, b.speech_band_snr_db, b.quality_score, b.quality_grade,
+            b.noise.findings.iter().map(|f| (f.kind, f.confidence)).collect::<Vec<_>>());
+        let clipped = {
+            let sr = 16_000;
+            let mut s = tone(sr, 2.0, 500.0, 0.9);
+            for v in s.iter_mut() { *v = v.clamp(-0.7, 0.7) / 0.7; }
+            analyze(&s, sr, 1)
+        };
+        println!("clipped: clip% {:.2} score {} grade {}", clipped.clipped_percent, clipped.quality_score, clipped.quality_grade);
+    }
+
     #[test]
     fn a_missing_meeting_recording_is_a_clear_error() {
         let dir = std::env::temp_dir().join("cadence-profile-missing");
         let _ = std::fs::remove_dir_all(&dir);
         let err = profile_meeting(&dir, "nope").unwrap_err();
         assert!(err.contains("No recording found"));
+    }
+
+    #[test]
+    fn meeting_profile_rejects_invalid_ids_before_reading_audio() {
+        let dir = std::env::temp_dir().join("cadence-profile-invalid-ids");
+        let outside = dir.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        // If validation regresses, this would reach WAV decoding instead.
+        let wav = outside.join("original.wav");
+        std::fs::write(&wav, b"preserve this recording").unwrap();
+        for id in ["../outside", "..\\outside", "C:\\outside", "a:stream", "CON", "a ", ""] {
+            let err = profile_meeting(&dir, id).unwrap_err();
+            assert!(err.contains("invalid meeting path component"), "{id:?}: {err}");
+        }
+        assert_eq!(std::fs::read(wav).unwrap(), b"preserve this recording");
+        assert!(!dir.join("meetings").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn meeting_profile_reads_valid_recording_without_modifying_it() {
+        let dir = std::env::temp_dir().join("cadence-profile-valid-meeting");
+        let meeting = crate::storage::meeting_dir(&dir, "valid-meeting-123").unwrap();
+        std::fs::create_dir_all(&meeting).unwrap();
+        let wav = meeting.join("original.wav");
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16_000,
+            bits_per_sample: 16,
+            sample_format: SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(&wav, spec).unwrap();
+        for sample in tone(16_000, 1.0, 300.0, 0.5) {
+            writer.write_sample((sample * 32767.0) as i16).unwrap();
+        }
+        writer.finalize().unwrap();
+        let original = std::fs::read(&wav).unwrap();
+        let profile = profile_meeting(&dir, "valid-meeting-123").unwrap();
+        assert_eq!(profile.duration_ms, 1000);
+        assert_eq!(profile.sample_rate, 16_000);
+        assert_eq!(profile.channels, 1);
+        assert!((profile.peak_dbfs - amplitude_to_dbfs(0.5)).abs() < 0.2);
+        assert_eq!(std::fs::read(wav).unwrap(), original);
+        assert_eq!(std::fs::read_dir(meeting).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

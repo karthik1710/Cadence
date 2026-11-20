@@ -2,8 +2,8 @@
 //!
 //! The server is started when MoM generation begins and killed when it ends —
 //! it never outlives a processing run, so a finished meeting leaves no model
-//! resident in RAM. That matters most on the machines this tiering exists for:
-//! on 16 GB, several gigabytes held by an idle inference server is the
+//! resident in RAM. That matters most on the 16 GB minimum machine: there,
+//! several gigabytes held by an idle inference server is the
 //! difference between a responsive laptop and a swapping one.
 
 use crate::pipeline::http;
@@ -68,6 +68,20 @@ impl LlamaServer {
             .arg(context_tokens.to_string())
             .arg("--threads")
             .arg(threads.to_string())
+            // Quantize the KV cache to q8_0, roughly halving it: at 8K context
+            // a same-shape Qwen3 model measured ~540 MB less working set than
+            // at the f16 default, which is real headroom on a 16 GB machine.
+            // q8_0 rather than q4_0 is the smaller saving at the smaller
+            // precision cost; its effect on minutes quality is not yet
+            // benchmarked. A quantized V cache needs flash attention, so that
+            // is forced on rather than left to `auto`. Spellings verified
+            // against the pinned b10717 build's `--help`.
+            .arg("--flash-attn")
+            .arg("on")
+            .arg("--cache-type-k")
+            .arg("q8_0")
+            .arg("--cache-type-v")
+            .arg("q8_0")
             // Apply the model's own chat template, so instruct models are
             // prompted the way they were trained.
             .arg("--jinja")

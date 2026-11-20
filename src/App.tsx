@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import * as api from "./services/api";
-import { Notice, ThemeToggle } from "./components/ui";
+import { Notice, Spinner, ThemeToggle } from "./components/ui";
 import { AppLogo } from "./components/AppLogo";
 import { RecordingPanel } from "./features/recording/RecordingPanel";
 import { HistoryView } from "./features/history/HistoryView";
 import { SettingsView } from "./features/settings/SettingsView";
 import { MeetingView } from "./features/meeting/MeetingView";
+import { SetupView } from "./features/setup/SetupView";
 import { useTheme } from "./hooks/useTheme";
 import type { SetupStatus } from "./types";
 import "./App.css";
@@ -23,6 +24,10 @@ function App() {
   const [openMeetingId, setOpenMeetingId] = useState<string | null>(null);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
+  // "Record without setting up": recording must never wait on a download, so
+  // the setup screen can always be stepped past. Not persisted — the next
+  // launch asks again while models are still missing.
+  const [setupSkipped, setSetupSkipped] = useState(false);
   const [historyToken, setHistoryToken] = useState(0);
   const { theme, toggleTheme, persistError, dismissPersistError, syncTheme } = useTheme();
 
@@ -42,10 +47,16 @@ function App() {
     refreshSetup();
   }, [refreshSetup]);
 
-  const openSettings = () => {
+  const openSetup = () => {
     setOpenMeetingId(null);
-    setTab("settings");
+    setSetupSkipped(false);
   };
+
+  // Until the first check lands there is nothing to decide on, and showing
+  // the tabs would flash them before the setup screen replaced them. A failed
+  // check falls through to the tabs, with its error shown: never a dead end.
+  const checking = setupStatus === null && setupError === null;
+  const showSetup = setupStatus !== null && !setupStatus.ready && !setupSkipped;
 
   return (
     <main className="container">
@@ -72,7 +83,7 @@ function App() {
 
       {/* The tab bar is a fixed, non-scrolling shell element — only the
           content region below it (rendered into .content-scroll) scrolls. */}
-      {!openMeetingId && (
+      {!openMeetingId && !showSetup && !checking && (
         <nav className="tabs" role="tablist">
           {TABS.map((entry) => (
             <button
@@ -90,50 +101,65 @@ function App() {
       )}
 
       <div className="content-scroll">
-        {setupError && (
-          <Notice kind="error">
-            The local model set could not be checked: {setupError}
-          </Notice>
-        )}
-
-        {/* On the Meetings tab the fix (Record or Settings) lives elsewhere, so
-            this stays a short pointer rather than repeating the full banner. */}
-        {setupStatus && !setupStatus.ready && tab === "meetings" && !openMeetingId && (
-          <Notice kind="warning">
-            <span className="grow">
-              {setupStatus.message ?? "Some models still need to be installed."}
-            </span>
-            <button type="button" className="ghost" onClick={openSettings}>
-              Open Settings
-            </button>
-          </Notice>
-        )}
-
-        {openMeetingId ? (
-          <MeetingView
-            meetingId={openMeetingId}
-            onBack={() => setOpenMeetingId(null)}
-            onDeleted={() => {
-              setOpenMeetingId(null);
-              setHistoryToken((n) => n + 1);
-              setTab("meetings");
-            }}
+        {checking ? (
+          <p className="notice">
+            <Spinner />
+            Checking the local models
+          </p>
+        ) : showSetup && setupStatus ? (
+          <SetupView
+            status={setupStatus}
+            onRecheck={refreshSetup}
+            onSkip={() => setSetupSkipped(true)}
           />
         ) : (
           <>
-            {tab === "record" && (
-              <RecordingPanel
-                onOpenMeeting={setOpenMeetingId}
-                setupReady={setupStatus?.ready ?? false}
-                missingModels={setupStatus?.missing ?? []}
-                onOpenSettings={openSettings}
+            {setupError && (
+              <Notice kind="error">
+                The local model set could not be checked: {setupError}
+              </Notice>
+            )}
+
+            {/* On the Meetings tab the fix lives on the setup screen, so this
+                stays a short pointer rather than repeating the full banner. */}
+            {setupStatus && !setupStatus.ready && tab === "meetings" && !openMeetingId && (
+              <Notice kind="warning">
+                <span className="grow">
+                  {setupStatus.message ?? "Some models still need to be installed."}
+                </span>
+                <button type="button" className="ghost" onClick={openSetup}>
+                  Finish setting up
+                </button>
+              </Notice>
+            )}
+
+            {openMeetingId ? (
+              <MeetingView
+                meetingId={openMeetingId}
+                onBack={() => setOpenMeetingId(null)}
+                onDeleted={() => {
+                  setOpenMeetingId(null);
+                  setHistoryToken((n) => n + 1);
+                  setTab("meetings");
+                }}
               />
-            )}
-            {tab === "meetings" && (
-              <HistoryView onOpenMeeting={setOpenMeetingId} reloadToken={historyToken} />
-            )}
-            {tab === "settings" && (
-              <SettingsView onSetupChanged={refreshSetup} onThemeSaved={syncTheme} />
+            ) : (
+              <>
+                {tab === "record" && (
+                  <RecordingPanel
+                    onOpenMeeting={setOpenMeetingId}
+                    setupReady={setupStatus?.ready ?? false}
+                    missingModels={setupStatus?.missing ?? []}
+                    onOpenSetup={openSetup}
+                  />
+                )}
+                {tab === "meetings" && (
+                  <HistoryView onOpenMeeting={setOpenMeetingId} reloadToken={historyToken} />
+                )}
+                {tab === "settings" && (
+                  <SettingsView onSetupChanged={refreshSetup} onThemeSaved={syncTheme} />
+                )}
+              </>
             )}
           </>
         )}

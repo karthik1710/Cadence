@@ -5,10 +5,13 @@ node_modules/
 dist/
 dist-ssr/
 *.local
+*.tsbuildinfo
 
 # Rust / Tauri build output
 /src-tauri/target/
 /src-tauri/gen/schemas/
+/src-tauri/WixTools/
+*.pdb
 
 # Logs
 logs/
@@ -23,18 +26,50 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.pfx
 
-# Local AI models — installed at runtime, never bundled/committed (master prompt §27)
+# Local AI models — installed at runtime into %APPDATA%, never bundled or
+# committed. The extension rules catch a stray copy dropped anywhere in the
+# tree (e.g. a model fetched by hand for a test).
 /models/
+*.gguf
+*.onnx
+ggml-*.bin
 
-# Local app data if ever produced inside the repo during dev (meeting audio/transcripts are user data)
+# Native runtimes bundled into the installer: scripts/prepare-runtimes.ps1
+# fills vendor/runtimes/ from pinned archives cached in vendor/cache/. Only
+# the placeholder README is committed (Tauri fails the build if a resource
+# path is missing, so the folder must exist on a fresh clone).
+/vendor/cache/
+/vendor/runtimes/*
+!/vendor/runtimes/README.md
+
+# Meeting data is user data. The app writes it to %APPDATA%; these catch
+# anything produced inside the repo during dev or benchmarking.
 /meetings/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+
+# bench_cli output and the baseline clip cache (recordings-derived and
+# copyrighted; never committed — see docs/benchmarks.md)
+/bench-runs/
+
+# Claude Code per-user settings (shared settings live in .claude/settings.json)
+.claude/settings.local.json
 
 # Editor / OS
 .vscode/*
 !.vscode/extensions.json
 .idea/
+.vs/
 .DS_Store
+Thumbs.db
+desktop.ini
 *.suo
 *.ntvs*
 *.njsproj

@@ -52,6 +52,11 @@ pub fn run() {
             library::get_mom,
             library::export_meeting,
             library::reveal_meeting_folder,
+            // Derived side-cars: meeting type and the redaction scan
+            library::classify_meeting,
+            library::get_meeting_classification,
+            library::rescan_redactions,
+            library::get_redaction_summary,
             // Settings and model management
             configuration::get_host_info,
             configuration::get_settings,
@@ -59,9 +64,12 @@ pub fn run() {
             configuration::check_models,
             configuration::list_models,
             configuration::install_model,
+            configuration::install_required_models,
             configuration::get_install_progress,
             configuration::remove_model,
             configuration::verify_model,
+            configuration::list_retired_models,
+            configuration::remove_retired_model,
             // Native window backdrop (presentation only)
         ])
         .run(tauri::generate_context!())

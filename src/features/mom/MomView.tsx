@@ -111,6 +111,17 @@ export function MomView({ mom, renames, onSeek }: Props) {
             {mom.meta.chunk_count} transcript chunk(s) in {mom.meta.language}. Prompts{" "}
             {mom.meta.extraction_prompt} / {mom.meta.synthesis_prompt}.
           </p>
+          {/* What the model was *shown*, which is not the same as what this
+              screen shows. Minutes written from a verbatim transcript read
+              differently from ones written from a masked one, and without
+              this there is no way to tell the two apart after the fact. */}
+          <p className="muted">
+            {mom.meta.redaction_mode === "unknown"
+              ? "These minutes predate redaction tracking, so whether the model saw flagged language was not recorded."
+              : mom.meta.redaction_mode === "mask" || mom.meta.redaction_mode === "redact"
+                ? `Flagged language was hidden from the model before it wrote these minutes (${mom.meta.redaction_mode} mode).`
+                : "The model read the transcript verbatim, including any flagged language."}
+          </p>
           {mom.meta.repaired && (
             <Notice kind="warning">
               The model's first answer was malformed and had to be repaired before it

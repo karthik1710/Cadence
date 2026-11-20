@@ -1,0 +1,35 @@
+# Cadence unparliamentary-language lexicon — romanized Tamil ("Tanglish")
+#
+# Same format as en.txt:  term | category | severity
+# Allowlist entries start with "!".
+#
+# --------------------------------------------------------------------------
+# THIS FILE SHIPS EMPTY, ON PURPOSE.
+# --------------------------------------------------------------------------
+#
+# Romanized Tamil has no standard orthography. One spoken word has a dozen
+# written forms, none of them wrong, and which forms whisper.cpp actually
+# emits for a given speaker is not something this project can currently
+# predict: no Tamil or code-switched audio has been through the pipeline yet
+# (see the open risks in docs/roadmap.md). Recall against a hand-written
+# variant list would therefore be unknown, and — worse — precision would be
+# unknown too, because short romanized Tamil strings collide with ordinary
+# English words and with each other.
+#
+# Shipping a guessed list would put false positives on innocent speech in a
+# circulated meeting record, which is a worse failure than missing a word.
+# So the machinery is here and the list is not, and this is a stated gap
+# rather than a silent one.
+#
+# To populate it, either:
+#
+#   * put your own file at %APPDATA%\com.cadence.app\lexicon\ta-latn.txt —
+#     it is merged over this one at load time, no rebuild needed; or
+#   * add terms here once there is real Tanglish audio to measure recall and
+#     precision against.
+#
+# When you do, list the spelling variants explicitly. Normalisation folds
+# case, leetspeak and repeated characters, and Tier 2 matching (enabled with
+# "Catch misspellings") adds an edit-distance-1 and a phonetic match for
+# `severe` terms only — but none of that invents a transliteration you did
+# not write down.

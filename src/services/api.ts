@@ -9,12 +9,15 @@ import type {
   AudioDeviceInfo,
   HostReport,
   InstallProgress,
+  MeetingClassification,
   MeetingMetadata,
   MeetingStatus,
   MeetingSummary,
   ModelStatus,
   Mom,
   RecordingSummary,
+  RedactionSummary,
+  RetiredModel,
   SetupStatus,
   Settings,
   Transcript,
@@ -66,8 +69,11 @@ export const finalizeRecording = (
     channels,
   });
 
-export const startProcessing = (meetingId: string) =>
-  invoke<void>("start_processing", { meetingId });
+/** `expectedSpeakers` is required on purpose: `null` means "Not sure"
+ * (automatic clustering) and is saved as such, so a caller that forgot to pass
+ * the meeting's saved hint would silently clear it. */
+export const startProcessing = (meetingId: string, expectedSpeakers: number | null) =>
+  invoke<void>("start_processing", { meetingId, expectedSpeakers });
 
 export const regenerateMom = (meetingId: string) =>
   invoke<void>("regenerate_mom", { meetingId });
@@ -117,6 +123,30 @@ export const exportMeeting = (meetingId: string, format: "markdown" | "json") =>
 export const revealMeetingFolder = (meetingId: string) =>
   invoke<string>("reveal_meeting_folder", { meetingId });
 
+// --- meeting insights ------------------------------------------------
+
+/** Runs the classifier over a meeting's transcript and writes
+ * `classification.json`. Cheap: it counts over the transcript, no model is
+ * loaded and nothing leaves the machine. */
+export const classifyMeeting = (meetingId: string) =>
+  invoke<MeetingClassification>("classify_meeting", { meetingId });
+
+/** Null for a meeting recorded before classification existed, or one that
+ * has never been processed — the caller shows the panel only when it isn't. */
+export const getMeetingClassification = (meetingId: string) =>
+  invoke<MeetingClassification | null>("get_meeting_classification", {
+    meetingId,
+  });
+
+/** Re-runs the sensitive-language scan over an existing transcript with the
+ * current lexicon and settings, rewriting the per-turn flags in place. */
+export const rescanRedactions = (meetingId: string) =>
+  invoke<RedactionSummary>("rescan_redactions", { meetingId });
+
+/** Null when this meeting has never been scanned. */
+export const getRedactionSummary = (meetingId: string) =>
+  invoke<RedactionSummary | null>("get_redaction_summary", { meetingId });
+
 // --- settings and models --------------------------------------------
 
 export const getHostInfo = () => invoke<HostReport>("get_host_info");
@@ -133,6 +163,13 @@ export const listModels = () => invoke<ModelStatus[]>("list_models");
 export const installModel = (modelId: string) =>
   invoke<void>("install_model", { modelId });
 
+/** Queues every missing required model and installs them one after another
+ * in the backend. Resolves with the queued ids in install order; progress is
+ * read per id with `getInstallProgress`. Rejects if a setup run is already
+ * going. Only ever called from an explicit click on the setup screen. */
+export const installRequiredModels = () =>
+  invoke<string[]>("install_required_models");
+
 export const getInstallProgress = (modelId: string) =>
   invoke<InstallProgress | null>("get_install_progress", { modelId });
 
@@ -141,6 +178,14 @@ export const removeModel = (modelId: string) =>
 
 export const verifyModel = (modelId: string) =>
   invoke<VerifyReport>("verify_model", { modelId });
+
+/** Models in the models folder that the current set no longer uses. */
+export const listRetiredModels = () => invoke<RetiredModel[]>("list_retired_models");
+
+/** Deletes one of them. Only ever called after a confirmed click; the backend
+ * refuses while a download is running and never touches the current set. */
+export const removeRetiredModel = (key: string) =>
+  invoke<RetiredModel>("remove_retired_model", { key });
 
 /// Errors from `invoke` arrive as strings; anything else is unexpected and
 /// still needs to reach the user rather than being swallowed.

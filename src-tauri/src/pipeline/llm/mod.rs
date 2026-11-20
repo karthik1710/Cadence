@@ -15,7 +15,7 @@ use crate::models_manager;
 use crate::pipeline::http;
 use crate::pipeline::paths::ModelPaths;
 use crate::settings::Settings;
-use crate::system::{HostInfo, MemoryProfile};
+use crate::system::{self, HostInfo};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
@@ -49,10 +49,10 @@ pub struct LlamaCppProvider {
 }
 
 impl LlamaCppProvider {
-    /// Starts a local llama.cpp server for the model the settings select.
+    /// Starts a local llama.cpp server for Cadence's one language model.
     ///
-    /// Refuses to start a model that plainly will not fit in the machine's
-    /// free RAM, with a message naming a smaller one — on a 16 GB laptop, an
+    /// Refuses to start when the model plainly will not fit in the machine's
+    /// free RAM, and says what to do about it — on a 16 GB laptop, an
     /// out-of-memory kill mid-generation would lose the MoM stage, and
     /// failures must be legible and recoverable, not mysterious.
     pub fn start(
@@ -61,12 +61,38 @@ impl LlamaCppProvider {
         host: &HostInfo,
         data_dir: &Path,
     ) -> Result<Self, String> {
-        let profile = settings.effective_profile();
-        let context_tokens = settings.effective_llm_context();
         let model_id = settings.effective_llm_model();
+        Self::start_with_model(
+            paths,
+            &model_id,
+            models_manager::entry(&model_id),
+            settings.effective_llm_context(),
+            settings.effective_llm_threads(host),
+            host,
+            data_dir,
+        )
+    }
 
-        if let Some(entry) = models_manager::entry(&model_id) {
-            preflight_memory(entry, context_tokens, profile, host)?;
+    /// Starts the server on `paths.llm_model` with an explicit model id,
+    /// context and thread count, instead of reading them through `Settings`.
+    ///
+    /// [`Self::start`] is the app's path and delegates here. The other caller
+    /// is `bench_cli compare`, which runs candidate models that are
+    /// deliberately not in the app's catalog: it points `paths.llm_model` at
+    /// the candidate and passes the candidate's own entry for the memory
+    /// pre-flight. `catalog_entry` of `None` skips that pre-flight.
+    pub fn start_with_model(
+        paths: &ModelPaths,
+        model_id: &str,
+        catalog_entry: Option<&models_manager::CatalogEntry>,
+        context_tokens: usize,
+        threads: usize,
+        host: &HostInfo,
+        data_dir: &Path,
+    ) -> Result<Self, String> {
+        let model_id = model_id.to_string();
+        if let Some(entry) = catalog_entry {
+            preflight_memory(entry, context_tokens, host)?;
         }
 
         let log_path = data_dir.join("logs").join("llama-server.log");
@@ -74,7 +100,7 @@ impl LlamaCppProvider {
             &paths.llama_server(),
             &paths.llm_model,
             context_tokens,
-            settings.effective_llm_threads(host),
+            threads.max(1),
             &log_path,
         )?;
 
@@ -166,28 +192,45 @@ impl LlmProvider for LlamaCppProvider {
 fn preflight_memory(
     entry: &models_manager::CatalogEntry,
     context_tokens: usize,
-    profile: MemoryProfile,
     host: &HostInfo,
 ) -> Result<(), String> {
     let estimated = entry.estimated_llm_ram_mb(context_tokens);
     // Keep a headroom slice for Windows, the webview, and the file cache.
     let headroom_mb = 1_500;
-    if estimated + headroom_mb > host.available_ram_mb {
+    // The free RAM the check actually asks for. The message quotes this
+    // number, not the bare estimate: a user who frees exactly the estimate
+    // would otherwise be refused again with the same message.
+    let required_free_mb = estimated + headroom_mb;
+    if required_free_mb > host.available_ram_mb {
+        // There is no smaller model to fall back to — every machine runs the
+        // same one — so the advice is about freeing memory. The transcript is
+        // already saved by the time this runs; only the minutes wait.
+        let minimum_note = if host.meets_minimum() {
+            ""
+        } else {
+            " — this machine has less"
+        };
+        let shortfall_mb = required_free_mb - host.available_ram_mb;
         return Err(format!(
-            "{} needs about {} MB at a {} token context, but only {} MB of RAM is free on this machine ({} MB total). \
-Close other applications, or pick a smaller model or context in Settings → Models.",
-            entry.label, estimated, context_tokens, host.available_ram_mb, host.total_ram_mb
+            "Writing the minutes with {} needs about {} MB of free RAM ({} MB for the model at a {} token context, plus {} MB kept free for Windows and Cadence), but only {} MB is free on this machine ({} MB total). Close other applications (browsers especially) to free at least {} MB more, then regenerate the minutes. Cadence needs a machine with at least 16 GB of RAM{minimum_note}.",
+            entry.label,
+            required_free_mb,
+            estimated,
+            context_tokens,
+            headroom_mb,
+            host.available_ram_mb,
+            host.total_ram_mb,
+            shortfall_mb
         ));
     }
-    if estimated > profile.llm_ram_budget_mb() {
-        // Over the tier's budget but the RAM is physically there: proceed,
-        // and say so, rather than blocking a user who chose this deliberately.
+    if estimated > system::LLM_RAM_BUDGET_MB {
+        // Over the budget but the RAM is physically there: proceed, and say
+        // so. Only reachable if the catalog's size or the context drifts.
         eprintln!(
-            "[llm] {} is estimated at {} MB, above the {} MB budget for the {} profile",
+            "[llm] {} is estimated at {} MB, above the {} MB budget",
             entry.label,
             estimated,
-            profile.llm_ram_budget_mb(),
-            profile.as_str()
+            system::LLM_RAM_BUDGET_MB
         );
     }
     Ok(())
@@ -393,25 +436,66 @@ mod tests {
 
     #[test]
     fn a_model_too_big_for_free_ram_is_refused_with_advice() {
-        let entry = models_manager::entry("qwen3-8b-q4").unwrap();
+        let entry = models_manager::entry(system::LLM_MODEL_ID).unwrap();
         let host = HostInfo {
             total_ram_mb: 15_700,
             available_ram_mb: 3_000,
             logical_cores: 8,
         };
-        let err = preflight_memory(entry, 8192, MemoryProfile::Balanced, &host).unwrap_err();
-        assert!(err.contains("Settings"), "should tell the user what to do");
+        let err = preflight_memory(entry, system::LLM_CONTEXT_TOKENS, &host).unwrap_err();
+        assert!(err.contains("Close other applications"), "{err}");
+        assert!(err.contains("16 GB"), "{err}");
+        // There is no smaller model any more, so it must not point at one.
+        assert!(!err.contains("smaller model"), "{err}");
+        assert!(!err.contains("has less"), "a 16 GB machine meets the minimum");
     }
 
     #[test]
-    fn the_16gb_default_passes_preflight_on_a_16gb_machine() {
-        let entry = models_manager::entry("qwen3-4b-q4").unwrap();
+    fn the_free_ram_the_message_asks_for_is_the_free_ram_the_check_needs() {
+        let entry = models_manager::entry(system::LLM_MODEL_ID).unwrap();
+        let context = system::LLM_CONTEXT_TOKENS;
+        let host = |available_ram_mb| HostInfo {
+            total_ram_mb: 15_700,
+            available_ram_mb,
+            logical_cores: 8,
+        };
+        // One megabyte short: refused, quoting the threshold and the gap.
+        let err = preflight_memory(entry, context, &host(3_000)).unwrap_err();
+        let quoted: u64 = err
+            .split("needs about ")
+            .nth(1)
+            .and_then(|rest| rest.split(" MB").next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("no threshold in: {err}"));
+        assert!(err.contains(&format!("{} MB for the model", entry.estimated_llm_ram_mb(context))), "{err}");
+        let err = preflight_memory(entry, context, &host(quoted - 1)).unwrap_err();
+        assert!(err.contains(&format!("needs about {quoted} MB of free RAM")), "{err}");
+        assert!(err.contains("at least 1 MB more"), "{err}");
+        // Freeing exactly what the message asked for is enough.
+        assert!(preflight_memory(entry, context, &host(quoted)).is_ok());
+    }
+
+    #[test]
+    fn a_machine_below_the_minimum_is_told_so() {
+        let entry = models_manager::entry(system::LLM_MODEL_ID).unwrap();
+        let host = HostInfo {
+            total_ram_mb: 8_100,
+            available_ram_mb: 3_000,
+            logical_cores: 4,
+        };
+        let err = preflight_memory(entry, system::LLM_CONTEXT_TOKENS, &host).unwrap_err();
+        assert!(err.contains("this machine has less"), "{err}");
+    }
+
+    #[test]
+    fn the_model_passes_preflight_on_a_typical_16gb_machine() {
+        let entry = models_manager::entry(system::LLM_MODEL_ID).unwrap();
         let host = HostInfo {
             total_ram_mb: 15_700,
             available_ram_mb: 9_000,
             logical_cores: 8,
         };
-        assert!(preflight_memory(entry, 4096, MemoryProfile::Balanced, &host).is_ok());
+        assert!(preflight_memory(entry, system::LLM_CONTEXT_TOKENS, &host).is_ok());
     }
 
     #[test]

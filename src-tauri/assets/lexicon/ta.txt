@@ -1,0 +1,17 @@
+# Cadence unparliamentary-language lexicon — Tamil script
+#
+# Same format as en.txt:  term | category | severity
+# Allowlist entries start with "!".
+#
+# Ships empty for the same reason as ta-latn.txt: no Tamil audio has been
+# through this pipeline yet, so neither recall nor precision of a list written
+# here could be stated honestly. Tamil-script terms are at least spelled one
+# way, which makes this the easier of the two to populate once there is audio
+# to check it against.
+#
+# Override without a rebuild at:
+#   %APPDATA%\com.cadence.app\lexicon\ta.txt
+#
+# Note that normalisation lowercases and collapses repeated characters but
+# does not transliterate: a term written here in Tamil script matches Tamil
+# script in the transcript, and romanized speech belongs in ta-latn.txt.

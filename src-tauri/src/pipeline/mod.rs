@@ -4,15 +4,20 @@ pub mod chunk;
 pub mod codeswitch;
 pub mod denoise;
 pub mod diarization;
+pub mod enhance;
 pub mod http;
 pub mod llm;
 pub mod models;
+pub mod noise_class;
 pub mod mom;
 pub mod paths;
 pub mod preprocess;
 pub mod proc;
 pub mod prompts;
+pub mod redact;
+pub mod spectrum;
 pub mod stt;
+pub mod topic;
 pub mod vad;
 
 use models::{Mom, Transcript};
@@ -38,6 +43,14 @@ pub struct PipelineConfig {
     /// sherpa-onnx clustering distance. Smaller splits one voice across
     /// several speaker ids; larger collapses distinct voices into one.
     pub cluster_threshold: f32,
+    /// The organiser's "how many people spoke?" hint for *this* meeting.
+    /// `Some(n)` makes diarization cluster into exactly `n` speakers
+    /// (`--clustering.num-clusters`), and sherpa-onnx then ignores
+    /// `cluster_threshold` entirely; `None` is the automatic, threshold-based
+    /// clustering. Per meeting, never from Settings — which is why
+    /// [`PipelineConfig::from_settings`] always leaves it `None` and the caller
+    /// fills it in. See [`validate_expected_speakers`].
+    pub expected_speakers: Option<u32>,
     pub generate_mom: bool,
     /// "auto" | "code-switched" | an ISO code — see [`stt::SttLanguage`].
     pub stt_language: String,
@@ -63,6 +76,7 @@ impl PipelineConfig {
             stt_threads: settings.effective_stt_threads(host),
             diarization_threads: settings.effective_diarization_threads(host),
             cluster_threshold: settings.cluster_threshold,
+            expected_speakers: None,
             generate_mom: settings.generate_mom,
             stt_language: settings.stt_language.clone(),
             mom_language: settings.mom_language.clone(),
@@ -82,6 +96,41 @@ impl Default for PipelineConfig {
 }
 
 pub use settings::{DEFAULT_CLUSTER_THRESHOLD, MAX_DIARIZATION_THREADS, MAX_STT_THREADS};
+
+/// Bounds on the expected-speakers hint.
+///
+/// The hint is offered for small rooms only, because that is where a fixed
+/// cluster count was measured to work. sherpa-onnx cuts its linkage tree at
+/// `n` clusters, and stray embeddings consume some of those clusters while
+/// emitting almost no speech — so a larger `n` does not yield `n` voices.
+/// Measured 2026-10-06: on the council baseline clip (anchor, reporter and
+/// several council voices), `n = 7` produced fewer substantial voices than the
+/// 0.5 threshold did (4 ids holding ≥5% of the talk against 6 on the
+/// pipeline's `processed.wav`; 2 against 5 on the raw audio). On the
+/// one-speaker TED clip, `n = 1` was exact: one id, against 10 at 0.5.
+///
+/// Four is the cap because a mistake there is bounded: the fewer the voices,
+/// the fewer stray clusters can take their place. Above it the UI's "5 or
+/// more" means automatic clustering, the same as "Not sure". Raise this only
+/// on labelled evidence that larger counts hold up.
+pub const MIN_EXPECTED_SPEAKERS: u32 = 1;
+pub const MAX_EXPECTED_SPEAKERS: u32 = 4;
+
+/// Accepts `None` ("Not sure") or a count in
+/// `MIN_EXPECTED_SPEAKERS..=MAX_EXPECTED_SPEAKERS`. Anything else is an error
+/// the user sees, rather than a value silently clamped into one they did not
+/// choose.
+pub fn validate_expected_speakers(hint: Option<u32>) -> Result<Option<u32>, String> {
+    match hint {
+        None => Ok(None),
+        Some(n) if (MIN_EXPECTED_SPEAKERS..=MAX_EXPECTED_SPEAKERS).contains(&n) => Ok(Some(n)),
+        Some(n) => Err(format!(
+            "The number of speakers must be between {MIN_EXPECTED_SPEAKERS} and \
+             {MAX_EXPECTED_SPEAKERS} (got {n}). For a larger group, choose \"Not sure\" \
+             and Cadence detects speakers automatically."
+        )),
+    }
+}
 
 /// Everything one pipeline run needs. Grouped into a struct because the run
 /// spans four subsystems and a positional argument list would be unreadable.
@@ -129,6 +178,10 @@ pub struct RunMetrics {
     pub llm_model: String,
     pub stt_threads: usize,
     pub diarization_threads: usize,
+    /// The expected-speakers hint diarization ran with; `None` means automatic
+    /// (threshold) clustering. Recorded so a run's speaker count can be read
+    /// against what it was told to produce.
+    pub expected_speakers: Option<u32>,
     /// What the front-end chain actually did to the audio.
     pub preprocess_report: Option<PreprocessReport>,
     /// `None` when the optional denoiser did not run.
@@ -149,6 +202,15 @@ pub struct RunMetrics {
     /// Anything about this run a user should know: a skipped optional stage, a
     /// recording that is mostly silence. Never fatal.
     pub warnings: Vec<String>,
+    /// Unparliamentary-language scan. `0` when the mode is `off` and the scan
+    /// never ran, which is also how an old `metrics.json` reads back.
+    pub redact_ms: u64,
+    /// Meeting-type classification. Cheap enough that it is not worth a
+    /// separate progress stage, but worth measuring in case that stops being
+    /// true on a three-hour recording.
+    pub classify_ms: u64,
+    /// Spans the redaction scan flagged across the whole transcript.
+    pub flags_found: usize,
 }
 
 impl RunMetrics {
@@ -184,6 +246,7 @@ pub fn run(
         llm_model: request.settings.effective_llm_model(),
         stt_threads: request.config.stt_threads,
         diarization_threads: request.config.diarization_threads,
+        expected_speakers: request.config.expected_speakers,
         ..RunMetrics::default()
     };
 
@@ -193,6 +256,14 @@ pub fn run(
     let report = run_front_end(request, &processed, &mut metrics)?;
     metrics.preprocess_report = Some(report);
     metrics.preprocess_ms = stage_started.elapsed().as_millis() as u64;
+
+    // Profiling reads `original.wav`, not `processed.wav`: the point of the
+    // report is to tell the user what their *room and microphone* did, and the
+    // front end has by then already hidden some of it (normalised the level,
+    // possibly subtracted the room tone). It runs after preprocessing rather
+    // than before only so a profiling bug can never delay the stages that
+    // matter.
+    run_audio_profile(request, &mut metrics);
 
     // VAD runs on the final preprocessed audio, before the expensive stages,
     // so its speech ratio describes exactly what they will see — and, in
@@ -231,13 +302,24 @@ pub fn run(
 
     on_stage("ALIGNING", 60);
     let stage_started = std::time::Instant::now();
-    let transcript = Transcript {
+    let mut transcript = Transcript {
         meeting_id: request.meeting_id.to_string(),
         segments: align::align(&stt_segments, &diarization),
     };
     metrics.align_ms = stage_started.elapsed().as_millis() as u64;
     metrics.audio_ms = transcript.duration_ms();
+
+    // Deliberately inside the ALIGNING window rather than announced as a stage
+    // of its own: `PIPELINE_STAGES` in the UI is a fixed list, and a stage name
+    // it does not know renders as an unlabelled step. Both of these are
+    // sub-second on a meeting-length transcript, so there is nothing for a
+    // progress bar to show anyway.
+    run_redaction(request, &mut transcript, &mut metrics);
+    // Written only after the flags are attached: `transcript.json` is the file
+    // every reader (the transcript view, export, `run_mom_only`) treats as
+    // authoritative, so it must never exist in a half-annotated state.
     write_json(&out_dir.join("transcript.json"), &transcript)?;
+    run_classification(request, &transcript, &mut metrics);
 
     if !request.config.generate_mom {
         metrics.total_ms = started.elapsed().as_millis() as u64;
@@ -288,7 +370,12 @@ pub fn run(
 ///
 /// The order matters: GTCRN is a 16 kHz model so it must run after the
 /// resample, and normalising before it would hand it a boosted noise floor to
-/// fight, so the gain stage is applied to the denoiser's output instead.
+/// fight, so the gain stage — compressor then normalize — is applied to the
+/// denoiser's output instead.
+///
+/// The two noise stages are mutually exclusive. When GTCRN will run, the
+/// model-free reducer is dropped; when it will not, the full chain runs and the
+/// model-free reducer is the noise handling.
 ///
 /// Every failure below is a *skip*, not an error: the un-denoised audio it
 /// started from is perfectly usable, and a processing stage must
@@ -310,7 +397,12 @@ fn run_front_end(
 
     let converted = request.out_dir.join("converted.wav");
     let denoised = request.out_dir.join("denoised.wav");
-    preprocess::preprocess(request.input_wav, &converted, &options.without_gain())?;
+    // GTCRN supersedes the model-free reducer, so the spectral-subtraction
+    // stage is dropped here rather than run twice over the same audio: the
+    // second pass would be estimating a noise floor the neural model has
+    // already removed, and its cost is a full STFT over the whole recording.
+    let front_options = options.without_gain().without_noise_reduction();
+    let front = preprocess::preprocess(request.input_wav, &converted, &front_options)?;
 
     match denoise::denoise(
         request.data_dir,
@@ -320,16 +412,124 @@ fn run_front_end(
     ) {
         Ok(stage) => {
             metrics.denoise = Some(stage);
-            preprocess::apply_gain(&denoised, processed, options)
+            let gain = preprocess::apply_gain(&denoised, processed, options)?;
+            Ok(merge_reports(front, gain))
         }
         Err(error) => {
             eprintln!("[pipeline] noise suppression failed, continuing without it: {error}");
             metrics
                 .warnings
                 .push(format!("Noise suppression was skipped: {error}"));
-            preprocess::apply_gain(&converted, processed, options)
+            // The model-free reducer was skipped above on the assumption GTCRN
+            // would run. It did not, so the chain is re-run from `original.wav`
+            // *with* it — the user asked for noise handling and this is the
+            // only one left. A second failure falls back to the audio already
+            // on disk: slightly noisier is always better than no meeting.
+            let fallback = request.out_dir.join("converted_nr.wav");
+            match preprocess::preprocess(request.input_wav, &fallback, &options.without_gain()) {
+                Ok(front) => {
+                    let gain = preprocess::apply_gain(&fallback, processed, options)?;
+                    Ok(merge_reports(front, gain))
+                }
+                Err(second) => {
+                    eprintln!("[pipeline] noise reduction fallback also failed: {second}");
+                    let gain = preprocess::apply_gain(&converted, processed, options)?;
+                    Ok(merge_reports(front, gain))
+                }
+            }
         }
     }
+}
+
+/// Stitches the two halves of a split front end back into one report.
+///
+/// When denoising runs, the chain is cut in two — DC/high-pass/noise reduction
+/// before the model, leveler/compressor/normalize after it — and each half returns its
+/// own report describing only what it did. Reporting just the second half
+/// would silently drop the input format and the noise-reduction result, which
+/// is exactly the information someone reads `metrics.json` to find.
+fn merge_reports(front: PreprocessReport, gain: PreprocessReport) -> PreprocessReport {
+    PreprocessReport {
+        // The true input, from the half that actually opened `original.wav`.
+        input_sample_rate: front.input_sample_rate,
+        input_channels: front.input_channels,
+        removed_dc_offset: front.removed_dc_offset,
+        input_rms_dbfs: front.input_rms_dbfs,
+        noise_reduction: front.noise_reduction,
+        // The output, and the gain stages, from the half that wrote it.
+        ..gain
+    }
+}
+
+/// Measures the untouched recording and writes `audio_profile.json`.
+///
+/// Best-effort by construction: a meeting whose audio cannot be profiled is
+/// still a meeting, and the profile exists to explain a poor transcript, not to
+/// gate one.
+fn run_audio_profile(request: &RunRequest, metrics: &mut RunMetrics) {
+    match audio_profile::profile_wav(request.input_wav) {
+        Ok(profile) => {
+            // The profile's warnings are the room's problems — a mic too far
+            // away, a fan, clipping. They belong in the run's warnings so the
+            // one place a user looks after a bad transcript has them.
+            metrics.warnings.extend(profile.warnings.iter().cloned());
+            let _ = write_json(&request.out_dir.join("audio_profile.json"), &profile);
+        }
+        Err(error) => {
+            eprintln!("[pipeline] audio profiling skipped: {error}");
+        }
+    }
+}
+
+/// Annotates the transcript's turns with unparliamentary-language spans and
+/// writes `redaction.json`.
+///
+/// Flags are annotations, never edits: `segment.text` stays exactly what was
+/// said, which is what makes a wrong flag reversible and lets the mode be
+/// changed after the fact without reprocessing. Masking happens at render and
+/// export time.
+fn run_redaction(request: &RunRequest, transcript: &mut Transcript, metrics: &mut RunMetrics) {
+    let mode = request.settings.effective_redaction_mode();
+    if mode == redact::RedactionMode::Off {
+        return;
+    }
+    let started = std::time::Instant::now();
+
+    // Loaded from the data dir rather than `builtin()`, so a user's own
+    // additions and — more importantly — their removals of a false positive
+    // apply to the run that is happening now.
+    let lexicon = redact::Lexicon::load(request.data_dir);
+    let turns: Vec<String> = transcript
+        .segments
+        .iter()
+        .map(|segment| segment.text.clone())
+        .collect();
+    let options = redact::ScanOptions {
+        fuzzy: request.settings.redaction_fuzzy,
+    };
+    let (per_turn, summary) = redact::scan_turns(&turns, &lexicon, &options);
+
+    for (segment, flags) in transcript.segments.iter_mut().zip(per_turn) {
+        segment.flags = flags;
+    }
+    metrics.flags_found = summary.total;
+    metrics.redact_ms = started.elapsed().as_millis() as u64;
+    let _ = write_json(&request.out_dir.join("redaction.json"), &summary);
+}
+
+/// Classifies the meeting and writes `classification.json`.
+///
+/// Reads the transcript that is already on disk, adds a file beside it, and
+/// touches nothing else — so this is the one stage that could be deleted
+/// wholesale without any other stage noticing.
+fn run_classification(request: &RunRequest, transcript: &Transcript, metrics: &mut RunMetrics) {
+    if !request.settings.classify_meeting {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let classification = topic::classify(transcript);
+    metrics.classify_ms = started.elapsed().as_millis() as u64;
+    let _ = write_json(&request.out_dir.join("classification.json"), &classification);
 }
 
 /// What the VAD stage leaves for STT to work with.
@@ -455,6 +655,7 @@ fn generate_minutes(
             title: request.title,
             language: &request.config.mom_language,
             data_dir: Some(request.data_dir),
+            redaction: request.settings.effective_redaction_mode(),
         },
         on_stage,
     )
@@ -501,6 +702,20 @@ mod tests {
         assert_eq!(config.diarization_threads, 8);
         assert_eq!(config.cluster_threshold, DEFAULT_CLUSTER_THRESHOLD);
         assert!(config.generate_mom);
+        // A per-meeting hint never comes from Settings.
+        assert_eq!(config.expected_speakers, None);
+    }
+
+    #[test]
+    fn expected_speakers_accepts_not_sure_and_one_to_four_only() {
+        assert_eq!(validate_expected_speakers(None), Ok(None));
+        assert_eq!(validate_expected_speakers(Some(1)), Ok(Some(1)));
+        assert_eq!(validate_expected_speakers(Some(4)), Ok(Some(4)));
+        assert!(validate_expected_speakers(Some(0)).is_err());
+        // Five or more is automatic clustering, never a fixed count.
+        assert!(validate_expected_speakers(Some(5)).is_err());
+        assert!(validate_expected_speakers(Some(7)).is_err());
+        assert!(validate_expected_speakers(Some(u32::MAX)).is_err());
     }
 
     #[test]

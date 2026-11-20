@@ -20,6 +20,7 @@
 //!   to produce.
 
 use crate::pipeline::audio_profile::{amplitude_to_dbfs, dbfs_to_amplitude, rms};
+use crate::pipeline::enhance;
 use crate::settings::Settings;
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use std::path::Path;
@@ -42,6 +43,16 @@ pub struct PreprocessOptions {
     pub target_rms_dbfs: f32,
     /// Ceiling the limiter holds after normalisation, so gain never clips.
     pub peak_ceiling_dbfs: f32,
+    /// Even out the distance across a meeting table. `None` disables the
+    /// stage — see [`crate::settings::Settings::effective_compressor`].
+    pub compressor: Option<enhance::CompressorOptions>,
+    /// Slow speech-gated gain riding across the table. `None` disables the
+    /// stage.
+    pub leveler: Option<enhance::LevelerOptions>,
+    /// Model-free spectral subtraction. `None` disables the stage. On by
+    /// default as the fallback for a machine without GTCRN, which supersedes
+    /// it wherever it is installed.
+    pub noise_reduction: Option<enhance::NoiseReductionOptions>,
 }
 
 impl Default for PreprocessOptions {
@@ -52,6 +63,17 @@ impl Default for PreprocessOptions {
             normalize: true,
             target_rms_dbfs: -20.0,
             peak_ceiling_dbfs: -1.0,
+            // On: cheap, and it is what lifts the far end of a meeting table
+            // above the noise floor.
+            compressor: Some(enhance::CompressorOptions::default()),
+            // On: O(n), and the compressor alone cannot lift a talker who is
+            // consistently 20 dB down — it only ever sees peaks.
+            leveler: Some(enhance::LevelerOptions::default()),
+            // On: it is the only noise handling a machine without the
+            // optional GTCRN model gets. Where GTCRN is installed the
+            // pipeline drops it via `without_noise_reduction`, so the two
+            // never both run.
+            noise_reduction: Some(enhance::NoiseReductionOptions::default()),
         }
     }
 }
@@ -64,15 +86,41 @@ impl PreprocessOptions {
             normalize: settings.preprocess_normalize,
             target_rms_dbfs: settings.preprocess_target_rms_dbfs,
             peak_ceiling_dbfs: -1.0,
+            compressor: settings.effective_compressor(),
+            // No Settings field yet, so it is always on with its defaults. A
+            // toggle can be wired later the way the compressor's is.
+            leveler: Some(enhance::LevelerOptions::default()),
+            noise_reduction: settings.effective_noise_reduction(),
         }
     }
 
-    /// The same chain with the gain stage removed. Used when denoising runs
-    /// next: normalising first would hand the denoiser a boosted noise floor
-    /// to fight, so the gain is applied to its output instead.
+    /// The same chain with every *gain* stage removed. Used when the GTCRN
+    /// denoiser runs next: normalising first would hand it a boosted noise
+    /// floor to fight, and leveling or compressing first would hand it a
+    /// signal whose noise floor moves, which is exactly what a noise
+    /// estimator cannot cope with. All three are applied to its output
+    /// instead, by [`apply_gain`] — so the leveler runs exactly once, after
+    /// the denoiser.
+    ///
+    /// Model-free noise reduction deliberately stays: it is a *cleaning*
+    /// stage, not a level one, and running it before the denoiser is the same
+    /// order it would have had in a single pass.
     pub fn without_gain(&self) -> Self {
         Self {
             normalize: false,
+            compressor: None,
+            leveler: None,
+            ..*self
+        }
+    }
+
+    /// The same chain with the model-free denoiser removed. The caller that
+    /// wants this is one that has a *better* denoiser to run — spending a full
+    /// STFT on spectral subtraction before GTCRN sees the audio would be
+    /// paying twice to remove the same room tone.
+    pub fn without_noise_reduction(&self) -> Self {
+        Self {
+            noise_reduction: None,
             ..*self
         }
     }
@@ -89,6 +137,13 @@ pub struct PreprocessReport {
     pub input_rms_dbfs: f32,
     pub output_rms_dbfs: f32,
     pub output_peak_dbfs: f32,
+    /// `None` when the stage did not run. "Enabled" and "did something" are
+    /// different claims, and only the second one is evidence.
+    pub compressor: Option<enhance::CompressorReport>,
+    pub noise_reduction: Option<enhance::NoiseReductionReport>,
+    /// Defaulted so a report written before the leveler existed still loads.
+    #[serde(default)]
+    pub leveler: Option<enhance::LevelerReport>,
 }
 
 /// Downmixes to mono and resamples to 16kHz via linear interpolation.
@@ -161,8 +216,14 @@ pub fn preprocess(
     Ok(report)
 }
 
-/// Runs only the level stage over an already 16 kHz mono file. This is the
+/// Runs only the level stages over an already 16 kHz mono file. This is the
 /// second half of [`preprocess`], applied after denoising.
+///
+/// "Level stages" means the leveler, the compressor and normalise, and
+/// nothing else: DC
+/// removal and the high-pass already ran before the denoiser, and re-running
+/// the model-free noise reduction over audio a *model* has just cleaned would
+/// spend a whole STFT chasing a room tone that is no longer there.
 pub fn apply_gain(
     input_path: &Path,
     output_path: &Path,
@@ -171,12 +232,32 @@ pub fn apply_gain(
     let gain_only = PreprocessOptions {
         remove_dc: false,
         high_pass_hz: 0.0,
+        noise_reduction: None,
         ..*options
     };
     preprocess(input_path, output_path, &gain_only)
 }
 
 /// The DSP itself, split out so it is testable without touching the disk.
+///
+/// The order is **DC removal → high-pass → noise reduction → leveler →
+/// compressor → normalise**, and it is not arbitrary:
+///
+/// * DC removal and the high-pass come first because everything after them
+///   measures levels, and a constant offset or a shelf of rumble makes every
+///   one of those measurements describe the room's plumbing rather than its
+///   speech.
+/// * Noise reduction comes before the leveler, so the leveler's speech/pause
+///   decision is made against a lower, cleaner floor: the further speech
+///   sits above the room, the fewer quiet words are mistaken for the room.
+/// * The leveler comes before the compressor, so the compressor only has the
+///   fast peaks the slow leveler cannot follow left to catch, rather than
+///   fighting the leveler over the same phrase-length level. Both come after
+///   noise reduction for the same reason: each raises whatever is quiet, and
+///   left to itself would happily raise hiss.
+/// * The compressor comes before normalise, so normalise is still the stage
+///   that sets the final level and holds the peak ceiling. Compressing after
+///   it would undo the ceiling the limiter had just enforced.
 pub fn apply_chain(
     samples: &mut [f32],
     sample_rate: u32,
@@ -195,6 +276,24 @@ pub fn apply_chain(
     }
     if options.high_pass_hz > 0.0 && options.high_pass_hz < sample_rate as f32 / 2.0 {
         Biquad::high_pass(options.high_pass_hz, sample_rate as f32).process(samples);
+    }
+    if let Some(nr) = options.noise_reduction.as_ref() {
+        // `reduce_noise` builds a new signal rather than working in place, so
+        // that a disappointing result costs nothing to discard. Here the
+        // caller owns the buffer, so the cleaned signal is copied back over
+        // it — same length by construction, but zipped rather than indexed so
+        // a future change to that guarantee cannot become an out-of-bounds.
+        let (cleaned, nr_report) = enhance::reduce_noise(samples, sample_rate, nr);
+        for (slot, value) in samples.iter_mut().zip(cleaned) {
+            *slot = value;
+        }
+        report.noise_reduction = Some(nr_report);
+    }
+    if let Some(leveler) = options.leveler.as_ref() {
+        report.leveler = Some(enhance::level(samples, sample_rate, leveler));
+    }
+    if let Some(compressor) = options.compressor.as_ref() {
+        report.compressor = Some(enhance::compress(samples, sample_rate, compressor));
     }
     if options.normalize {
         report.applied_gain_db =
@@ -573,20 +672,222 @@ mod tests {
             remove_dc: false,
             high_pass_hz: 0.0,
             normalize: false,
+            compressor: None,
+            leveler: None,
+            noise_reduction: None,
             ..PreprocessOptions::default()
         };
         let report = apply_chain(&mut samples, sr, &options);
         assert_eq!(samples, original);
         assert_eq!(report.applied_gain_db, 0.0);
         assert_eq!(report.removed_dc_offset, 0.0);
+        assert!(report.compressor.is_none());
+        assert!(report.leveler.is_none());
+        assert!(report.noise_reduction.is_none());
     }
 
     #[test]
-    fn without_gain_keeps_the_rest_of_the_chain() {
-        let options = PreprocessOptions::default().without_gain();
+    fn without_gain_drops_every_level_stage_and_nothing_else() {
+        let options = PreprocessOptions {
+            noise_reduction: Some(enhance::NoiseReductionOptions::default()),
+            ..PreprocessOptions::default()
+        }
+        .without_gain();
         assert!(!options.normalize);
+        // The compressor and the leveler are gain stages too: leaving either
+        // in would hand the GTCRN denoiser a signal whose noise floor moves.
+        assert!(options.compressor.is_none());
+        assert!(options.leveler.is_none());
+        // Cleaning stages stay.
         assert!(options.remove_dc);
         assert_eq!(options.high_pass_hz, 80.0);
+        assert!(options.noise_reduction.is_some());
+    }
+
+    #[test]
+    fn without_noise_reduction_drops_only_the_denoiser() {
+        let options = PreprocessOptions {
+            noise_reduction: Some(enhance::NoiseReductionOptions { strength: 0.9 }),
+            ..PreprocessOptions::default()
+        }
+        .without_noise_reduction();
+        assert!(options.noise_reduction.is_none());
+        assert!(options.remove_dc);
+        assert_eq!(options.high_pass_hz, 80.0);
+        assert!(options.normalize);
+        assert!(options.compressor.is_some());
+        assert!(options.leveler.is_some());
+    }
+
+    #[test]
+    fn the_chain_runs_dc_then_high_pass_then_noise_reduction_then_leveler_then_compressor_then_normalise(
+    ) {
+        // Each assertion below pins one *adjacency* in the order, by checking
+        // a number that could only have been measured at that point in the
+        // chain — rather than by asserting on the samples, which would only
+        // say the output changed.
+        let sr = 16_000u32;
+        let mut source: Vec<f32> = Vec::new();
+        // A near and a far talker taking turns, with pauses between them so
+        // the leveler has a floor to tell them from.
+        for burst in 0..6 {
+            let amplitude = if burst % 2 == 0 { 0.05 } else { 0.008 };
+            source.extend(tone(sr, 0.5, 1_000.0, amplitude));
+            source.extend(vec![0.0f32; sr as usize / 4]);
+        }
+        // Broadband room tone for the denoiser to find, 25 Hz of rumble for
+        // the high-pass to remove, and a constant offset for DC removal.
+        let mut state = 7u32;
+        let rumble = tone(sr, source.len() as f32 / sr as f32, 25.0, 0.02);
+        for (i, s) in source.iter_mut().enumerate() {
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let hiss = (((state >> 16) as f32 / 32_768.0) - 1.0) * 0.004;
+            *s += hiss + rumble.get(i).copied().unwrap_or(0.0) + 0.05;
+        }
+
+        let nr = Some(enhance::NoiseReductionOptions { strength: 1.0 });
+        let run_keeping_audio = |options: &PreprocessOptions| {
+            let mut samples = source.clone();
+            let report = apply_chain(&mut samples, sr, options);
+            (report, samples)
+        };
+        let run = |options: &PreprocessOptions| run_keeping_audio(options).0;
+        let crest = |r: &PreprocessReport| r.output_peak_dbfs - r.output_rms_dbfs;
+        // What the leveler would measure as the floor, if handed this audio.
+        let floor_seen_in = |mut samples: Vec<f32>| {
+            enhance::level(&mut samples, sr, &enhance::LevelerOptions::default()).noise_floor_dbfs
+        };
+
+        let (cleaned_only, cleaned_audio) = run_keeping_audio(&PreprocessOptions {
+            normalize: false,
+            compressor: None,
+            leveler: None,
+            noise_reduction: None,
+            ..PreprocessOptions::default()
+        });
+        let (cleaned_and_denoised, denoised_audio) = run_keeping_audio(&PreprocessOptions {
+            normalize: false,
+            compressor: None,
+            leveler: None,
+            noise_reduction: nr,
+            ..PreprocessOptions::default()
+        });
+        let up_to_the_leveler = run(&PreprocessOptions {
+            normalize: false,
+            compressor: None,
+            noise_reduction: nr,
+            ..PreprocessOptions::default()
+        });
+        let up_to_the_compressor = run(&PreprocessOptions {
+            normalize: false,
+            noise_reduction: nr,
+            ..PreprocessOptions::default()
+        });
+        let full = run(&PreprocessOptions {
+            noise_reduction: nr,
+            ..PreprocessOptions::default()
+        });
+
+        // DC removal ran *before* the high-pass: it still had the whole offset
+        // to find. Had the filter gone first there would have been nothing
+        // left to remove and this would read ~0.
+        assert!(
+            (full.removed_dc_offset - 0.05).abs() < 5e-3,
+            "removed {}",
+            full.removed_dc_offset
+        );
+
+        // Noise reduction ran *before* the leveler: the floor the leveler
+        // steered by is the denoised signal's, not the merely-filtered one's.
+        let leveler = full.leveler.expect("the leveler ran");
+        let denoised_floor = floor_seen_in(denoised_audio);
+        let filtered_floor = floor_seen_in(cleaned_audio);
+        assert!(
+            (leveler.noise_floor_dbfs - denoised_floor).abs() < 0.05,
+            "leveler saw a floor of {} dBFS, denoised audio has {}",
+            leveler.noise_floor_dbfs,
+            denoised_floor
+        );
+        assert!(
+            (denoised_floor - filtered_floor).abs() > 1.0,
+            "the denoiser did not move the floor, so this test proves nothing"
+        );
+        assert!(
+            (crest(&cleaned_and_denoised) - crest(&cleaned_only)).abs() > 0.05,
+            "the denoiser did nothing, so this test proves nothing"
+        );
+
+        // The leveler ran *before* the compressor: the crest the compressor
+        // reports at its input is the leveled signal's, not the denoised one's.
+        let compressor = full.compressor.expect("the compressor ran");
+        assert!(
+            (compressor.crest_before_db - crest(&up_to_the_leveler)).abs() < 0.05,
+            "compressor saw {} dB of crest, leveled audio has {}",
+            compressor.crest_before_db,
+            crest(&up_to_the_leveler)
+        );
+        assert!(
+            (crest(&up_to_the_leveler) - crest(&cleaned_and_denoised)).abs() > 0.05,
+            "the leveler did nothing, so this test proves nothing"
+        );
+
+        // The compressor ran *before* normalise: the gain normalise chose is
+        // exactly the gain that takes the *compressed* level to the target.
+        let expected_gain = PreprocessOptions::default().target_rms_dbfs
+            - up_to_the_compressor.output_rms_dbfs;
+        assert!(
+            (full.applied_gain_db - expected_gain).abs() < 0.05,
+            "normalise applied {} dB, expected {} dB from the compressed level",
+            full.applied_gain_db,
+            expected_gain
+        );
+
+        // And normalise, being last, is still what holds the peak ceiling.
+        assert!(
+            full.output_peak_dbfs <= PreprocessOptions::default().peak_ceiling_dbfs + 0.1,
+            "peak escaped the ceiling at {} dBFS",
+            full.output_peak_dbfs
+        );
+        assert!(full.noise_reduction.is_some());
+    }
+
+    #[test]
+    fn every_stage_is_on_by_default_and_gtcrn_still_drops_the_model_free_denoiser() {
+        let options = PreprocessOptions::default();
+        assert_eq!(options.compressor, Some(enhance::CompressorOptions::default()));
+        assert_eq!(options.leveler, Some(enhance::LevelerOptions::default()));
+        assert_eq!(
+            options.noise_reduction,
+            Some(enhance::NoiseReductionOptions::default())
+        );
+        // The GTCRN path strips it, so the two denoisers never both run.
+        assert!(options.without_noise_reduction().noise_reduction.is_none());
+    }
+
+    #[test]
+    fn apply_gain_runs_the_level_stages_and_skips_the_denoiser() {
+        let dir = std::env::temp_dir().join("cadence-preprocess-gain-stages");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("in.wav");
+        let output = dir.join("out.wav");
+        // Loud enough for the compressor to have something to reduce.
+        let mut samples = tone(16_000, 1.0, 400.0, 0.5);
+        samples.extend(tone(16_000, 1.0, 400.0, 0.02));
+        write_mono_16k(&input, &samples).unwrap();
+
+        let options = PreprocessOptions {
+            noise_reduction: Some(enhance::NoiseReductionOptions::default()),
+            ..PreprocessOptions::default()
+        };
+        let report = apply_gain(&input, &output, &options).unwrap();
+        // The compressor and the leveler are level stages, so they run...
+        assert!(report.compressor.is_some());
+        assert!(report.leveler.is_some());
+        // ...and the denoiser is not, so it does not: GTCRN has already
+        // cleaned this audio and a second pass would only cost an STFT.
+        assert!(report.noise_reduction.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

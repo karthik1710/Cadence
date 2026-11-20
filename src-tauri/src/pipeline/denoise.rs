@@ -1,15 +1,16 @@
-//! Optional noise suppression, via sherpa-onnx's offline GTCRN denoiser.
+//! Noise suppression, via sherpa-onnx's offline GTCRN denoiser.
 //!
 //! Meeting rooms are noisy in ways a high-pass filter cannot fix — keyboards,
 //! projector fans, a corridor through an open door. GTCRN is a small ONNX
 //! speech-enhancement model that runs on CPU at a fraction of real time, which
 //! keeps it inside the budget.
 //!
-//! It is deliberately **optional** (not in `models_manager::required_ids`):
-//! nothing about Cadence stops working without it, and a processing
-//! stage must never cost a meeting. So a missing model is a logged skip, not a
-//! failure, and even a denoiser that crashes mid-run leaves the pipeline with
-//! the perfectly usable un-denoised audio it started from.
+//! The model is part of the required set that first-run setup installs, but
+//! the *stage* stays skippable: a file deleted or corrupted after setup must
+//! not stop Cadence working, and a processing stage must never cost a
+//! meeting. So a missing model is a logged skip, not a failure — the model-free
+//! reducer in `enhance` handles the noise instead — and even a denoiser that
+//! crashes mid-run leaves the pipeline with usable audio.
 
 use crate::models_manager;
 use crate::pipeline::paths;
@@ -17,13 +18,13 @@ use crate::pipeline::proc::{self, StageMetrics};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Catalog id of the GTCRN weights. Optional — see `models_manager`.
+/// Catalog id of the GTCRN weights. Required at setup; skippable at run time.
 pub const DENOISE_MODEL_ID: &str = "denoise-gtcrn";
 
 const DENOISE_BINARY: &str = "sherpa-onnx-offline-denoiser.exe";
 
 pub fn binary_path(data_dir: &Path) -> PathBuf {
-    paths::models_dir(data_dir).join("bin").join(DENOISE_BINARY)
+    paths::runtime_binary(data_dir, models_manager::Runtime::Sherpa, DENOISE_BINARY)
 }
 
 pub fn model_path(data_dir: &Path) -> PathBuf {
@@ -119,24 +120,16 @@ mod tests {
     }
 
     #[test]
-    fn the_model_is_optional_and_never_required() {
+    fn the_model_is_installed_with_the_required_set() {
         assert!(models_manager::entry(DENOISE_MODEL_ID).is_some());
-        for profile in [
-            crate::system::MemoryProfile::Low,
-            crate::system::MemoryProfile::Balanced,
-            crate::system::MemoryProfile::High,
-        ] {
-            assert!(
-                !models_manager::required_ids(profile).contains(&DENOISE_MODEL_ID),
-                "{profile:?} must not require the optional denoiser"
-            );
-        }
+        assert!(models_manager::required_ids().contains(&DENOISE_MODEL_ID));
     }
 
     #[test]
     fn paths_land_under_the_models_directory() {
         let dir = Path::new("C:\\data");
-        assert!(binary_path(dir).ends_with(DENOISE_BINARY));
+        // In the sherpa-onnx runtime's own folder, beside its DLLs.
+        assert!(binary_path(dir).ends_with(Path::new("models").join("bin").join("sherpa").join(DENOISE_BINARY)));
         assert!(model_path(dir)
             .to_string_lossy()
             .contains("gtcrn_simple.onnx"));
@@ -150,7 +143,7 @@ mod tests {
         assert!(reason.contains("binary is not installed"), "{reason}");
 
         // With the binary present but no weights, the message changes.
-        std::fs::create_dir_all(paths::models_dir(&dir).join("bin")).unwrap();
+        std::fs::create_dir_all(binary_path(&dir).parent().unwrap()).unwrap();
         std::fs::write(binary_path(&dir), b"stub").unwrap();
         let reason = unavailable_reason(&dir).unwrap();
         assert!(reason.contains("model is not installed"), "{reason}");

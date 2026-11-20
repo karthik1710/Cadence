@@ -21,9 +21,12 @@ Using a cloud coding assistant (this one included) during development does not v
 9. Ground every generated decision/action item in transcript evidence — never invent decisions, owners, or deadlines; use `null` and preserve uncertainty when evidence is thin.
 10. Keep prompts versioned under `prompts/`, not hard-coded in UI components.
 11. Keep UI (React) separate from AI/business logic.
-12. Stay within the memory budget: LLM process RAM ≤ 15 GB hard limit, ≤ 10 GB preferred.
+12. Stay within the memory budget: one model set for every machine, sized for the 16 GB minimum — the LLM's advisory budget is 7,000 MB, and minutes are refused (never the transcript) when free RAM is short. Never reintroduce per-machine model tiers; if the model does not fit, replace the single model.
 13. Document architecture decisions as they're made — update `docs/architecture.md` and `docs/benchmarks.md`, not just code comments.
 14. Add tests alongside each major feature.
+15. Keep each native runtime (whisper.cpp, llama.cpp, sherpa-onnx) in its own folder with the DLLs it shipped with. Never put two runtimes' binaries in one folder: they ship same-named DLLs from different versions, and a shared folder silently runs one tool on the other's libraries.
+16. Model downloads happen only on an explicit user action, one at a time across the whole app, and never while a meeting is recording or processing.
+17. A release build never downloads an executable. The native runtimes ship inside the signed installer, built from upstream archives pinned by SHA-256 (`scripts/prepare-runtimes.ps1`); first-run setup downloads model data only. Never weaken a pin to make a mismatch pass. See [docs/release.md](docs/release.md).
 
 ## End-of-phase report
 

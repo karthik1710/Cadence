@@ -2,7 +2,10 @@ use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Word-level timestamp from whisper.cpp (when `--split-on-word` output is available).
+/// Word-level timestamp assembled from whisper.cpp's per-token offsets —
+/// `whisper-cli.exe --output-json-full`, or `whisper-server`'s `verbose_json`.
+/// Empty whenever whisper did not report them or they could not be trusted;
+/// [`crate::pipeline::align`] then falls back to whole-segment attribution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SttWord {
     pub start_ms: i64,
@@ -50,6 +53,17 @@ pub struct TranscriptSegment {
     /// older `transcript.json` round-trips unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    /// Unparliamentary-language spans found in `text`, as *annotations*.
+    ///
+    /// `text` above is always what was actually said — flagging never edits
+    /// it, which is what keeps the policy adjustable after the fact and makes
+    /// a wrong flag reversible. Masking happens at render and export time
+    /// instead. See [`crate::pipeline::redact`].
+    ///
+    /// Empty is skipped when serializing, so a `transcript.json` written
+    /// before this existed reads back byte-identical.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flags: Vec<crate::pipeline::redact::Flag>,
 }
 
 /// Marks a turn that spans more than one detected language — the thing
@@ -175,9 +189,28 @@ fn lenient_timestamp<'de, D: Deserializer<'de>>(
     Ok(number_to_i64(&value))
 }
 
+/// What [`MomMeta::redaction_mode`] reads as for a `mom.json` written before
+/// that field existed.
+///
+/// Deliberately *not* one of [`RedactionMode`]'s own names. Such a file was
+/// generated under some policy and kept no record of which, so naming a real
+/// mode would be inventing the provenance this struct exists to preserve —
+/// and `off` in particular would assert the one thing that cannot be checked
+/// afterwards, that the model was shown the meeting verbatim. `RedactionMode::parse`
+/// rejects this string, so anything that tries to read it back as a policy
+/// gets `None` and has to handle the gap rather than silently displaying a
+/// mode nobody chose.
+///
+/// [`RedactionMode`]: crate::pipeline::redact::RedactionMode
+pub const REDACTION_MODE_UNKNOWN: &str = "unknown";
+
+fn unknown_redaction_mode() -> String {
+    REDACTION_MODE_UNKNOWN.to_string()
+}
+
 /// Provenance for a generated MoM: which model, which quantization,
 /// which prompt versions, and when.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MomMeta {
     pub model: String,
     pub quantization: String,
@@ -186,12 +219,53 @@ pub struct MomMeta {
     pub extraction_prompt: String,
     pub synthesis_prompt: String,
     pub language: String,
+    /// The redaction policy the transcript was rendered under *before the
+    /// model saw it* — a `RedactionMode::as_str()` name. The same meeting
+    /// summarised under `off` and under `mask` yields materially different
+    /// minutes, and the two `mom.json` files are otherwise indistinguishable,
+    /// so without this the rest of the provenance here cannot describe, let
+    /// alone reproduce, the run that produced them.
+    ///
+    /// Missing from an older file rather than being an error: it falls back to
+    /// [`REDACTION_MODE_UNKNOWN`], because a meeting must never lose its
+    /// minutes to a provenance field being added underneath it.
+    #[serde(default = "unknown_redaction_mode")]
+    pub redaction_mode: String,
     pub chunk_count: usize,
     pub generated_at_ms: i64,
     /// True when the model's first answer failed validation and the
     /// repair-JSON prompt was needed.
     pub repaired: bool,
     pub duration_ms: i64,
+    /// Chunks whose extraction failed even after the repair pass, so the
+    /// minutes were built without them. `0` for a `mom.json` written before
+    /// this was recorded.
+    #[serde(default)]
+    pub failed_chunks: usize,
+}
+
+/// Written out rather than derived so that a default `MomMeta` spells its
+/// unknown redaction mode the same way a legacy file deserialises to. The
+/// derived version would leave the field empty, which would be a second
+/// spelling of "unknown" that nothing downstream recognises.
+impl Default for MomMeta {
+    fn default() -> Self {
+        Self {
+            model: String::new(),
+            quantization: String::new(),
+            runtime: String::new(),
+            context_tokens: 0,
+            extraction_prompt: String::new(),
+            synthesis_prompt: String::new(),
+            language: String::new(),
+            redaction_mode: unknown_redaction_mode(),
+            chunk_count: 0,
+            generated_at_ms: 0,
+            repaired: false,
+            duration_ms: 0,
+            failed_chunks: 0,
+        }
+    }
 }
 
 /// Matches the MoM schema, with evidence attached.
@@ -553,6 +627,64 @@ mod tests {
     }
 
     #[test]
+    fn a_mom_written_before_the_redaction_mode_was_recorded_still_loads() {
+        // Exactly the `meta` block `mom.json` carried before redaction
+        // provenance existed. Failing this read would cost a meeting its
+        // minutes over a field that was added after they were generated.
+        let raw = r#"{
+            "summary": "We agreed the release slips a week.",
+            "participants": ["Person 1"],
+            "topics": [],
+            "decisions": [],
+            "actionItems": [],
+            "openQuestions": [],
+            "risks": [],
+            "detailedDiscussion": [],
+            "meta": {
+                "model": "qwen2.5-7b-instruct",
+                "quantization": "Q4_K_M",
+                "runtime": "llama.cpp",
+                "context_tokens": 8192,
+                "extraction_prompt": "extraction_v1",
+                "synthesis_prompt": "synthesis_v1",
+                "language": "English",
+                "chunk_count": 3,
+                "generated_at_ms": 1700000000000,
+                "repaired": false,
+                "duration_ms": 42000
+            }
+        }"#;
+        let mom: Mom = serde_json::from_str(raw).unwrap();
+        let meta = mom.meta.expect("the meta block should have survived");
+        assert_eq!(meta.model, "qwen2.5-7b-instruct");
+        // Not "off": an old file records no mode, and claiming one would be
+        // asserting that the model saw the meeting verbatim.
+        assert_eq!(meta.redaction_mode, REDACTION_MODE_UNKNOWN);
+        // And the sentinel is not mistakable for a real policy.
+        assert_eq!(
+            crate::pipeline::redact::RedactionMode::parse(&meta.redaction_mode),
+            None
+        );
+    }
+
+    #[test]
+    fn a_recorded_redaction_mode_survives_a_round_trip() {
+        let meta = MomMeta {
+            redaction_mode: crate::pipeline::redact::RedactionMode::Mask
+                .as_str()
+                .to_string(),
+            ..MomMeta::default()
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(json.contains(r#""redaction_mode":"mask""#), "{json}");
+        let back: MomMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.redaction_mode, "mask");
+        // A default one is honest about knowing nothing, the same way a
+        // legacy file is.
+        assert_eq!(MomMeta::default().redaction_mode, REDACTION_MODE_UNKNOWN);
+    }
+
+    #[test]
     fn rejects_a_mom_with_an_empty_summary() {
         let mom = Mom::default();
         assert!(mom.validate().is_err());
@@ -669,6 +801,7 @@ mod tests {
                     end_ms: 1000,
                     text: "hello".to_string(),
                     language: None,
+                    flags: Vec::new(),
                 },
                 TranscriptSegment {
                     speaker: "SPEAKER_00".to_string(),
@@ -677,6 +810,7 @@ mod tests {
                     end_ms: 2500,
                     text: "hi".to_string(),
                     language: None,
+                    flags: Vec::new(),
                 },
                 TranscriptSegment {
                     speaker: "SPEAKER_01".to_string(),
@@ -685,6 +819,7 @@ mod tests {
                     end_ms: 3000,
                     text: "again".to_string(),
                     language: None,
+                    flags: Vec::new(),
                 },
             ],
         };

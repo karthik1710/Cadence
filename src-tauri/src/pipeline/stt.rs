@@ -8,7 +8,7 @@
 //! actually lives.
 
 use crate::pipeline::codeswitch;
-use crate::pipeline::models::SttSegment;
+use crate::pipeline::models::{SttSegment, SttWord};
 use crate::pipeline::paths::ModelPaths;
 use crate::pipeline::proc::{self, StageMetrics};
 use crate::pipeline::vad::SpeechSegment;
@@ -96,14 +96,115 @@ struct WhisperJsonOffsets {
 }
 
 #[derive(Debug, Deserialize)]
+struct WhisperJsonToken {
+    #[serde(default)]
+    text: String,
+    /// whisper.cpp writes a token's `offsets` only when it actually has
+    /// timestamps for it (`t0 > -1 && t1 > -1` in its own `output_json`), so
+    /// this is genuinely optional. Declaring it non-optional would make one
+    /// undated token fail the whole document — and the document is the
+    /// transcript.
+    #[serde(default)]
+    offsets: Option<WhisperJsonOffsets>,
+}
+
+#[derive(Debug, Deserialize)]
 struct WhisperJsonSegment {
     offsets: WhisperJsonOffsets,
     text: String,
+    /// Only written under [`FULL_JSON_FLAG`]. Defaults to empty so a
+    /// plain `--output-json` file — every `stt.json` written before this
+    /// existed, and the fallback run below — parses exactly as it used to.
+    #[serde(default)]
+    tokens: Vec<WhisperJsonToken>,
 }
 
 #[derive(Debug, Deserialize)]
 struct WhisperJsonOutput {
     transcription: Vec<WhisperJsonSegment>,
+}
+
+// ------------------------------------------------------------ word timing
+
+/// One whisper token placed on a timeline, before it is assembled into a word.
+///
+/// Both STT paths produce exactly this and nothing more: `whisper-cli.exe`'s
+/// `--output-json-full` writes a `tokens` array with millisecond `offsets`,
+/// and `whisper-server`'s `verbose_json` writes a `words` array with
+/// fractional-second `start`/`end`. Despite the server's field name, its
+/// entries are *tokens* too — a probe of the vendored binaries returned
+/// `" di"`, `"ar"`, `"ization"` as three separate "words" from both — so the
+/// two paths share [`assemble_words`] rather than each inventing a rule.
+pub(crate) struct RawToken<'a> {
+    pub text: &'a str,
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
+/// Joins whisper's tokens into words with start/end times.
+///
+/// Three things in the raw stream are not words, all three observed in a real
+/// run of the vendored `whisper-cli.exe`:
+///
+/// * **Special tokens.** `[_BEG_]` opens a segment and `[_TT_220]` closes one;
+///   both carry a timestamp and no speech. They must not become words.
+/// * **Sub-word pieces.** whisper's vocabulary is BPE, so `diarization` comes
+///   back as `" di"` + `"ar"` + `"ization"` spanning 210-980 ms. whisper marks
+///   the start of a word with a leading space, so a token *without* one
+///   continues the token before it.
+/// * **Punctuation.** `","` and `";"` arrive as their own tokens. They belong
+///   on the word they follow — and only its text, not its timing: in that same
+///   run the `;` was stamped at 4700 ms while the word it ends stopped at
+///   4310 ms, and letting punctuation stretch a word by 390 ms of silence
+///   would move the very boundary alignment is trying to find.
+///
+/// Never fails. A stream this cannot make sense of yields fewer words (or
+/// none), and [`crate::pipeline::align`] falls back to whole-segment
+/// attribution — worse speaker labels, never a lost transcript.
+pub(crate) fn assemble_words(tokens: &[RawToken]) -> Vec<SttWord> {
+    let mut words: Vec<SttWord> = Vec::new();
+
+    for token in tokens {
+        if is_special_token(token.text) {
+            continue;
+        }
+        let trimmed = token.text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // A leading space is whisper's own word delimiter, so its absence is
+        // what marks a continuation — of the word's spelling always, and of
+        // its span only when the piece is actual speech rather than a mark.
+        if !token.text.starts_with(char::is_whitespace) {
+            if let Some(last) = words.last_mut() {
+                last.text.push_str(trimmed);
+                if !is_punctuation_only(trimmed) {
+                    last.end_ms = last.end_ms.max(token.end_ms);
+                }
+                continue;
+            }
+        }
+
+        words.push(SttWord {
+            start_ms: token.start_ms,
+            end_ms: token.end_ms.max(token.start_ms),
+            text: trimmed.to_string(),
+        });
+    }
+
+    words
+}
+
+/// whisper's own markers: `[_BEG_]`, `[_TT_220]`, `[_SOT_]`, `[_EOT_]`, and
+/// the `<|0.00|>` timestamp spelling older builds use.
+fn is_special_token(text: &str) -> bool {
+    let text = text.trim();
+    (text.starts_with("[_") && text.ends_with(']')) || (text.starts_with("<|") && text.ends_with("|>"))
+}
+
+fn is_punctuation_only(text: &str) -> bool {
+    !text.is_empty() && !text.chars().any(char::is_alphanumeric)
 }
 
 /// Transcribes a recording in whichever language mode the settings ask for.
@@ -175,21 +276,71 @@ fn distinct_languages(segments: &[SttSegment]) -> Vec<String> {
     seen
 }
 
+/// whisper.cpp's verbose JSON output — the only way it will emit the
+/// per-token offsets word timestamps are built from.
+///
+/// Spelling verified against the vendored binary's own `--help`, not assumed:
+/// `-ojf, --output-json-full   [false  ] include more information in the JSON
+/// file`. It is an *addition* to `--output-json`, not a replacement, so both
+/// are passed and the fallback run simply drops this one.
+const FULL_JSON_FLAG: &str = "--output-json-full";
+
+/// whisper-cli's own defaults, pinned so a runtime update cannot switch
+/// decoding strategy underneath the baseline (whisper-server already defaults
+/// to greedy). Greedy is ruled out for this pipeline — see [`run_whisper`].
+const BEAM_SIZE: &str = "5";
+const BEST_OF: &str = "5";
+
+/// Why a `whisper-cli.exe` run failed, to the only resolution that differs.
+enum SttFailure {
+    /// This build does not know [`FULL_JSON_FLAG`]. It bails on the argument
+    /// before it loads a model, so re-running without the flag is cheap.
+    NoFullJson,
+    Other(String),
+}
+
 /// One `whisper-cli.exe` invocation over the whole file.
 ///
+/// Runs twice only in the one case that is recoverable: a whisper build too
+/// old for [`FULL_JSON_FLAG`] would otherwise cost the whole meeting for the
+/// sake of a timing refinement. Every other failure is reported on the first
+/// attempt, because re-decoding an hour of audio to produce the same error
+/// helps nobody.
+fn single_pass(
+    request: &SttRequest,
+    language: &str,
+) -> Result<(Vec<SttSegment>, StageMetrics), String> {
+    match run_whisper(request, language, true) {
+        Ok(outcome) => Ok(outcome),
+        Err(SttFailure::Other(reason)) => Err(reason),
+        Err(SttFailure::NoFullJson) => {
+            eprintln!(
+                "[stt] this whisper-cli.exe does not support {FULL_JSON_FLAG}; transcribing \
+without word timestamps. Speaker attribution falls back to whole-segment overlap."
+            );
+            run_whisper(request, language, false).map_err(|failure| match failure {
+                SttFailure::Other(reason) => reason,
+                SttFailure::NoFullJson => unreachable!("the flag was not passed"),
+            })
+        }
+    }
+}
+
 /// The `--max-len 80 --split-on-word --max-context 0` flags are load-bearing,
 /// not tuning knobs — see docs/benchmarks.md: without them whisper.cpp has been
 /// observed to silently collapse a real, multi-second span of speech into a
-/// short, wrong sentence.
+/// short, wrong sentence. `full_json` only ever *adds* an output flag; it must
+/// never be allowed to disturb those three.
 ///
 /// NOTE: `--translate` is never passed, and must never be added. The transcript must
 /// preserve the language actually spoken; translating here
 /// would destroy the original words for good. The minutes are the only thing
 /// that gets rendered into another language, via `mom_language`.
-fn single_pass(
+fn run_whisper(
     request: &SttRequest,
     language: &str,
-) -> Result<(Vec<SttSegment>, StageMetrics), String> {
+    full_json: bool,
+) -> Result<(Vec<SttSegment>, StageMetrics), SttFailure> {
     let wav_path = request.wav_path;
     // whisper.cpp appends `.json` itself, so pass the base path without it.
     let output_base = wav_path.with_extension("");
@@ -207,26 +358,52 @@ fn single_pass(
         .arg("--split-on-word")
         .arg("--max-context")
         .arg("0")
+        // Beam search, pinned rather than inherited from whisper-cli's
+        // defaults (which happen to be the same today), because greedy
+        // decoding is *unsafe* alongside `--max-context 0`. Measured
+        // 2026-10-06 on the baseline council clip: `--beam-size 1` cut the
+        // last ~20 s into segments truncated mid-word ("that reca", "council
+        // membo") — WER 16.7% -> 21.9%, deletions 7 -> 29 — with zero
+        // temperature fallbacks, so the fallback did not catch it; dropping
+        // `--max-context 0` alone made the truncation disappear. It was ~28%
+        // faster (2:00 excerpt, i7-1260P: 39-43 s -> 29 s), which is not worth
+        // silently losing words. See docs/benchmarks.md before changing this.
+        .arg("--beam-size")
+        .arg(BEAM_SIZE)
+        .arg("--best-of")
+        .arg(BEST_OF)
         .arg("-t")
         .arg(request.config.stt_threads.to_string())
-        .arg("--output-json")
-        .arg("--output-file")
-        .arg(&output_base);
+        .arg("--output-json");
+    if full_json {
+        command.arg(FULL_JSON_FLAG);
+    }
+    command.arg("--output-file").arg(&output_base);
 
-    let measured = proc::run_measured(command)?;
+    let measured = proc::run_measured(command).map_err(SttFailure::Other)?;
     if !measured.success {
-        return Err(format!(
+        if full_json && rejected_full_json(&measured.stderr) {
+            return Err(SttFailure::NoFullJson);
+        }
+        return Err(SttFailure::Other(format!(
             "whisper-cli.exe exited with {}: {}",
             measured.status,
             last_lines(&measured.stderr, 4)
-        ));
+        )));
     }
 
     let json_path = wav_path.with_extension("json");
     let raw = std::fs::read_to_string(&json_path)
-        .map_err(|e| format!("could not read whisper output {json_path:?}: {e}"))?;
-    let segments = parse_whisper_json(&raw)?;
+        .map_err(|e| SttFailure::Other(format!("could not read whisper output {json_path:?}: {e}")))?;
+    let segments = parse_whisper_json(&raw).map_err(SttFailure::Other)?;
     Ok((segments, measured.metrics))
+}
+
+/// whisper.cpp answers an unrecognised flag with `error: unknown argument:
+/// <flag>` and then prints its whole usage block, so this has to search the
+/// entire stderr — [`last_lines`] would only ever see the option list.
+fn rejected_full_json(stderr: &str) -> bool {
+    stderr.contains("unknown argument") && stderr.contains(FULL_JSON_FLAG)
 }
 
 fn parse_whisper_json(raw: &str) -> Result<Vec<SttSegment>, String> {
@@ -241,11 +418,25 @@ fn parse_whisper_json(raw: &str) -> Result<Vec<SttSegment>, String> {
             if text.is_empty() {
                 return None;
             }
+            // An undated token cannot be placed, so it is dropped here — which
+            // then leaves the assembled words unable to reconstruct `text`,
+            // which is exactly the condition `align` refuses to split on.
+            let tokens: Vec<RawToken> = seg
+                .tokens
+                .iter()
+                .filter_map(|token| {
+                    token.offsets.as_ref().map(|offsets| RawToken {
+                        text: &token.text,
+                        start_ms: offsets.from,
+                        end_ms: offsets.to,
+                    })
+                })
+                .collect();
             Some(SttSegment {
                 start_ms: seg.offsets.from,
                 end_ms: seg.offsets.to,
                 text,
-                words: Vec::new(),
+                words: assemble_words(&tokens),
                 // A single pass detects one language for the whole file, which
                 // is not a per-segment fact and must not be presented as one.
                 language: None,
@@ -285,6 +476,149 @@ mod tests {
     #[test]
     fn reports_unparseable_output() {
         assert!(parse_whisper_json("not json").is_err());
+    }
+
+    // --------------------------------------------------------- word timing
+
+    /// Abridged from a real `whisper-cli.exe --output-json-full` run against
+    /// the vendored `ggml-small.bin`, keeping every shape that matters: the
+    /// `[_BEG_]` / `[_TT_220]` markers, two BPE-split words, and a `;` stamped
+    /// 390 ms after the word it belongs to. Only the `id`/`p`/`t_dtw` noise is
+    /// trimmed. whisper cannot be run in CI, so the fixture is the honest
+    /// stand-in — but this one was recorded, not invented.
+    const FULL_JSON: &str = r#"{
+        "transcription": [
+            {
+                "offsets": {"from": 0, "to": 4780},
+                "text": " The diarization threshold and the quantization settings need recalibrating;",
+                "tokens": [
+                    {"text": "[_BEG_]",    "offsets": {"from": 0,    "to": 0},    "id": 50364, "p": 0.98, "t_dtw": -1},
+                    {"text": " The",       "offsets": {"from": 120,  "to": 200}},
+                    {"text": " di",        "offsets": {"from": 210,  "to": 350}},
+                    {"text": "ar",         "offsets": {"from": 350,  "to": 490}},
+                    {"text": "ization",    "offsets": {"from": 490,  "to": 980}},
+                    {"text": " threshold", "offsets": {"from": 980,  "to": 1600}},
+                    {"text": " and",       "offsets": {"from": 1610, "to": 1810}},
+                    {"text": " the",       "offsets": {"from": 1820, "to": 1990}},
+                    {"text": " quant",     "offsets": {"from": 2100, "to": 2380}},
+                    {"text": "ization",    "offsets": {"from": 2380, "to": 2870}},
+                    {"text": " settings",  "offsets": {"from": 2870, "to": 3420}},
+                    {"text": " need",      "offsets": {"from": 3430, "to": 3710}},
+                    {"text": " rec",       "offsets": {"from": 3710, "to": 3910}},
+                    {"text": "al",         "offsets": {"from": 3920, "to": 4060}},
+                    {"text": "ibr",        "offsets": {"from": 4060, "to": 4270}},
+                    {"text": "ating",      "offsets": {"from": 4270, "to": 4310}},
+                    {"text": ";",          "offsets": {"from": 4700, "to": 4700}},
+                    {"text": "[_TT_220]",  "offsets": {"from": 4780, "to": 4780}, "id": 50584, "p": 0.07, "t_dtw": -1}
+                ]
+            }
+        ]
+    }"#;
+
+    #[test]
+    fn assembles_whisper_tokens_into_timed_words() {
+        let segments = parse_whisper_json(FULL_JSON).unwrap();
+        let words: Vec<&str> = segments[0].words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(
+            words,
+            vec![
+                "The",
+                "diarization",
+                "threshold",
+                "and",
+                "the",
+                "quantization",
+                "settings",
+                "need",
+                "recalibrating;",
+            ]
+        );
+        // The words must spell out the segment, or align refuses to split on
+        // them — this is the property that promises a split loses no text.
+        assert_eq!(words.join(" "), segments[0].text);
+    }
+
+    #[test]
+    fn a_word_split_across_tokens_spans_all_of_them() {
+        let words = parse_whisper_json(FULL_JSON).unwrap().remove(0).words;
+        // " di" + "ar" + "ization": 210 through 980, not 210 through 350.
+        let diarization = &words[1];
+        assert_eq!(diarization.text, "diarization");
+        assert_eq!((diarization.start_ms, diarization.end_ms), (210, 980));
+    }
+
+    #[test]
+    fn punctuation_joins_the_previous_word_without_stretching_it() {
+        let words = parse_whisper_json(FULL_JSON).unwrap().remove(0).words;
+        let last = words.last().unwrap();
+        assert_eq!(last.text, "recalibrating;");
+        // The `;` was stamped at 4700, but the speech stopped at 4310. Taking
+        // the mark's timestamp would push the word 390 ms into silence.
+        assert_eq!((last.start_ms, last.end_ms), (3710, 4310));
+    }
+
+    #[test]
+    fn special_tokens_never_become_words() {
+        let words = parse_whisper_json(FULL_JSON).unwrap().remove(0).words;
+        assert!(
+            !words.iter().any(|w| w.text.contains("[_")),
+            "markers leaked into the transcript: {words:?}"
+        );
+        assert_eq!(words.first().unwrap().text, "The");
+    }
+
+    #[test]
+    fn an_undated_token_is_dropped_rather_than_failing_the_document() {
+        // whisper omits `offsets` on a token it has no timestamps for. The
+        // transcript must survive that; the word simply cannot be placed.
+        let raw = r#"{
+            "transcription": [
+                {"offsets": {"from": 0, "to": 900}, "text": "yes really",
+                 "tokens": [
+                    {"text": " yes", "offsets": {"from": 0, "to": 400}},
+                    {"text": " really", "id": 12}
+                 ]}
+            ]
+        }"#;
+        let segments = parse_whisper_json(raw).unwrap();
+        assert_eq!(segments[0].text, "yes really");
+        assert_eq!(segments[0].words.len(), 1);
+    }
+
+    #[test]
+    fn a_plain_output_json_file_still_parses_and_carries_no_words() {
+        // Everything written before `--output-json-full`, plus the fallback
+        // run when a whisper build rejects the flag.
+        let raw = r#"{"transcription": [{"offsets": {"from": 0, "to": 900}, "text": "hello"}]}"#;
+        let segments = parse_whisper_json(raw).unwrap();
+        assert_eq!(segments[0].text, "hello");
+        assert!(segments[0].words.is_empty());
+    }
+
+    #[test]
+    fn a_stray_leading_token_starts_a_word_rather_than_being_lost() {
+        let tokens = [
+            RawToken { text: "unspaced", start_ms: 0, end_ms: 100 },
+            RawToken { text: " ", start_ms: 100, end_ms: 100 },
+            RawToken { text: "!", start_ms: 100, end_ms: 120 },
+        ];
+        let words = assemble_words(&tokens);
+        assert_eq!(words.len(), 1);
+        assert_eq!(words[0].text, "unspaced!");
+        // Blank tokens contribute nothing, and the `!` moved no boundary.
+        assert_eq!(words[0].end_ms, 100);
+    }
+
+    #[test]
+    fn only_an_unknown_argument_error_triggers_the_no_flag_retry() {
+        // whisper prints the rejected flag and then its whole usage block, so
+        // the needle is nowhere near the tail of stderr.
+        let usage = format!(
+            "error: unknown argument: {FULL_JSON_FLAG}\n\nusage: whisper-cli.exe [options]\n  -t N\n  -oj\n"
+        );
+        assert!(rejected_full_json(&usage));
+        assert!(!rejected_full_json("error: failed to open the audio file"));
+        assert!(!rejected_full_json("error: unknown argument: --nonsense"));
     }
 
     #[test]

@@ -1,0 +1,142 @@
+# Cadence unparliamentary-language lexicon — English
+#
+# Format, one term per line:
+#
+#   term | category | severity
+#
+# category: profanity | slur | sexual | violent | insult
+# severity: mild | strong | severe
+#
+# An allowlist entry starts with "!" and suppresses a match whose surrounding
+# word equals it. This is what stops the Scunthorpe problem: a term that is a
+# substring of an innocent word.
+#
+#   !assessment
+#
+# Blank lines and lines starting with "#" are ignored. Terms are normalised
+# the same way transcript text is (lowercased, leetspeak folded, repeated
+# characters collapsed), so there is no point listing "sh1t" or "shiiit"
+# separately — write the plain form once.
+#
+# This file is compiled into the binary. To add terms for one organisation
+# without rebuilding, put a file of the same format at
+#
+#   %APPDATA%\com.cadence.app\lexicon\en.txt
+#
+# and it will be merged over this one at load time. An override entry for a
+# term already listed here replaces its category and severity.
+#
+# --------------------------------------------------------------------------
+#
+# WHAT IS DELIBERATELY NOT HERE: slurs. This file ships in a public source
+# repository, and a list of racial, religious, caste, sexual-orientation or
+# disability slurs does not belong in one. The `slur` category exists and is
+# handled throughout the pipeline; populating it is left to the deploying
+# organisation, through the override file above. That is also the right place
+# for it on the merits — which words an organisation treats as unrepeatable in
+# a circulated record is its own policy, not this project's.
+
+damn | profanity | mild
+goddamn | profanity | mild
+hell | profanity | mild
+crap | profanity | mild
+crappy | profanity | mild
+sucks | insult | mild
+screwed | profanity | mild
+freaking | profanity | mild
+frigging | profanity | mild
+bloody | profanity | mild
+bugger | profanity | mild
+git | insult | mild
+idiot | insult | mild
+moron | insult | mild
+stupid | insult | mild
+dumb | insult | mild
+jerk | insult | mild
+loser | insult | mild
+pathetic | insult | mild
+incompetent | insult | mild
+useless | insult | mild
+
+shit | profanity | strong
+bullshit | profanity | strong
+piss | profanity | strong
+pissed | profanity | strong
+arse | profanity | strong
+asshole | insult | strong
+arsehole | insult | strong
+bastard | insult | strong
+bitch | insult | strong
+dick | insult | strong
+prick | insult | strong
+douche | insult | strong
+douchebag | insult | strong
+bollocks | profanity | strong
+wanker | insult | strong
+tosser | insult | strong
+slut | sexual | strong
+whore | sexual | strong
+horny | sexual | strong
+screw you | insult | strong
+shut up | insult | mild
+
+fuck | profanity | severe
+fucking | profanity | severe
+fucker | insult | severe
+motherfucker | insult | severe
+twat | insult | severe
+cunt | insult | severe
+
+kill yourself | violent | severe
+kill you | violent | severe
+beat you up | violent | severe
+shoot you | violent | severe
+
+# Allowlist. Every one of these contains a listed term as a substring, and
+# every one of them is an ordinary word that turns up in a real meeting.
+!assessment
+!assess
+!assessed
+!assign
+!assignment
+!assist
+!assistant
+!assume
+!assumption
+!asset
+!assets
+!class
+!classes
+!classify
+!classification
+!pass
+!passed
+!password
+!bypass
+!grass
+!glass
+!mass
+!massive
+!compass
+!brass
+!analysis
+!analyst
+!hello
+!shell
+!shelf
+!michelle
+!hellenic
+!dickinson
+!scunthorpe
+!penistone
+!cockpit
+!cocktail
+!peacock
+!hancock
+!titles
+!title
+!constitute
+!substitute
+!institute
+!document
+!dumbbell

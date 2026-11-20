@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../../services/api";
-import { dateLabel, duration } from "../../services/format";
+import { dateLabel, duration, parseRedactionMode } from "../../services/format";
 import { useProcessingStatus } from "../../hooks/useProcessingStatus";
 import { AudioPlayer, type AudioPlayerHandle } from "../../components/AudioPlayer";
 import { Card, Notice, Spinner, StageChecklist, StateBadge } from "../../components/ui";
 import { TranscriptView } from "../transcript/TranscriptView";
 import { MomView } from "../mom/MomView";
-import type { MeetingSummary, Mom, Transcript } from "../../types";
+import { AudioQualityPanel, ClassificationPanel } from "./MeetingInsights";
+import { SpeakerCountField } from "../recording/SpeakerCountField";
+import type {
+  AudioProfile,
+  MeetingClassification,
+  MeetingSummary,
+  Mom,
+  RedactionMode,
+  RedactionSummary,
+  Transcript,
+} from "../../types";
 
 interface Props {
   meetingId: string;
@@ -26,30 +36,67 @@ export function MeetingView({ meetingId, onBack, onDeleted }: Props) {
   const [exported, setExported] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [runToken, setRunToken] = useState(0);
+  // "How many people spoke?" for the next (re-)run, starting from what this
+  // meeting was last processed with.
+  const [speakers, setSpeakers] = useState<number | null>(null);
+  // Best-effort extras. Each is null for a meeting recorded before the stage
+  // that produces it existed, and the panels below simply don't render.
+  const [profile, setProfile] = useState<AudioProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [classification, setClassification] = useState<MeetingClassification | null>(null);
+  const [redaction, setRedaction] = useState<RedactionSummary | null>(null);
+  const [redactionMode, setRedactionMode] = useState<RedactionMode>("flag");
+  const [insightBusy, setInsightBusy] = useState<"classify" | "rescan" | null>(null);
   const player = useRef<AudioPlayerHandle | null>(null);
 
   const load = useCallback(async () => {
     try {
       const summary = await api.getMeeting(meetingId);
       setMeeting(summary);
+      setSpeakers(summary.expected_speakers ?? null);
       setTranscript(
         summary.has_transcript ? await api.getTranscript(meetingId).catch(() => null) : null,
       );
       const minutes = summary.has_mom ? await api.getMom(meetingId).catch(() => null) : null;
       setMom(minutes);
       if (minutes) setTab("minutes");
+      // How flagged words are shown is a preference, not a property of the
+      // meeting, so it is read here rather than stored per meeting.
+      const stored = await api.getSettings().catch(() => null);
+      if (stored) setRedactionMode(parseRedactionMode(stored.redaction_mode));
     } catch (err) {
       setError(api.errorMessage(err));
     }
   }, [meetingId]);
 
+  /** Audio profile, classification and redaction counts. Kept off the main
+   * load path: each is optional, none of them may exist, and a failure in
+   * any of them must not cost the transcript its page. */
+  const loadInsights = useCallback(async () => {
+    setProfileLoading(true);
+    try {
+      const [audio, detected, flags] = await Promise.all([
+        api.profileMeetingAudio(meetingId).catch(() => null),
+        api.getMeetingClassification(meetingId).catch(() => null),
+        api.getRedactionSummary(meetingId).catch(() => null),
+      ]);
+      setProfile(audio);
+      setClassification(detected);
+      setRedaction(flags);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [meetingId]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadInsights();
+  }, [load, loadInsights]);
 
   const status = useProcessingStatus(meetingId, runToken, () => {
     // Processing settled — pick up whatever it produced.
     load();
+    loadInsights();
   });
 
   const processing = status?.status === "processing";
@@ -142,6 +189,17 @@ export function MeetingView({ meetingId, onBack, onDeleted }: Props) {
 
         <AudioPlayer ref={player} path={meeting.audio_path} />
 
+        {/* In a row of its own (for the row's top spacing — the player above
+            renders nothing for a meeting without audio), directly above the
+            "Re-run processing" button it feeds. */}
+        <div className="button-row">
+          <SpeakerCountField
+            value={speakers}
+            onChange={setSpeakers}
+            disabled={busy || processing}
+          />
+        </div>
+
         <div className="button-row">
           <button
             type="button"
@@ -149,7 +207,8 @@ export function MeetingView({ meetingId, onBack, onDeleted }: Props) {
             disabled={busy || processing}
             onClick={() =>
               run(async () => {
-                await api.startProcessing(meetingId);
+                await api.startProcessing(meetingId, speakers);
+                setMeeting({ ...meeting, expected_speakers: speakers });
                 setRunToken((n) => n + 1);
               })
             }
@@ -237,6 +296,32 @@ export function MeetingView({ meetingId, onBack, onDeleted }: Props) {
         </Card>
       )}
 
+      {!processing && (
+        <AudioQualityPanel profile={profile} loading={profileLoading && !profile} />
+      )}
+
+      {!processing && (
+        <ClassificationPanel
+          classification={classification}
+          loading={profileLoading && !classification}
+          canClassify={Boolean(transcript)}
+          busy={insightBusy === "classify"}
+          onClassify={
+            transcript
+              ? () =>
+                  run(async () => {
+                    setInsightBusy("classify");
+                    try {
+                      setClassification(await api.classifyMeeting(meetingId));
+                    } finally {
+                      setInsightBusy(null);
+                    }
+                  })
+              : undefined
+          }
+        />
+      )}
+
       {(transcript || mom) && (
         <Card>
           <div className="tabs" role="tablist">
@@ -270,6 +355,22 @@ export function MeetingView({ meetingId, onBack, onDeleted }: Props) {
               transcript={transcript}
               speakerNames={meeting.speaker_names}
               onSeek={seek}
+              redactionMode={redactionMode}
+              redactionSummary={redaction}
+              rescanning={insightBusy === "rescan"}
+              onRescanRedactions={() =>
+                run(async () => {
+                  setInsightBusy("rescan");
+                  try {
+                    setRedaction(await api.rescanRedactions(meetingId));
+                    // The scan rewrites the per-turn flags, so the transcript
+                    // in hand is now stale.
+                    setTranscript(await api.getTranscript(meetingId).catch(() => null));
+                  } finally {
+                    setInsightBusy(null);
+                  }
+                })
+              }
               onRenameSpeaker={(speaker, name) =>
                 run(async () => {
                   const updated = await api.renameSpeaker(meetingId, speaker, name);

@@ -1,0 +1,19 @@
+# Store text as LF in the repository regardless of each contributor's
+# core.autocrlf, so diffs never fill with line-ending churn.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF in the working tree.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary assets: never diff or convert.
+*.png binary
+*.ico binary
+*.icns binary
+*.wav binary
+*.gguf binary
+*.onnx binary
+*.bin binary
+*.dll binary
+*.exe binary

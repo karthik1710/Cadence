@@ -1694,6 +1694,68 @@ mark {
   font-size: 0.8rem;
 }
 
+/* --- first-run setup ------------------------------------------------------ */
+
+.setup-view {
+  display: block;
+  max-width: 44rem;
+  margin: 0 auto;
+}
+
+.setup-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-md);
+  background: var(--panel-quiet);
+}
+
+.setup-item {
+  padding: 0.65rem 0.8rem;
+  border-bottom: 1px solid var(--divider);
+  font-size: 0.85rem;
+}
+
+.setup-item:last-child {
+  border-bottom: none;
+}
+
+.setup-item-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.setup-item-row .model-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.setup-item-size {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.setup-item .notice {
+  margin-top: 0.5rem;
+}
+
+.setup-overall {
+  margin-top: var(--sp-3);
+}
+
+.setup-overall .progress-track {
+  max-width: none;
+  height: 8px;
+}
+
+.setup-skip {
+  margin: 1rem 0 0;
+  font-size: 0.82rem;
+}
+
 /* The Tauri window opens at 1100x760 and can be resized down to 800x600;
    below that everything stacks. The content region (`.content-scroll`)
    absorbs the height difference by scrolling — the window itself never grows
@@ -1726,4 +1788,470 @@ mark {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+/* --- settings: help text under a control (§28) ----------------------------
+
+   Both new settings sections are full of controls whose cost is not obvious
+   from the label — a compressor ratio, a spectral pass that doubles the
+   preprocessing time. The hint is part of the control, not a footnote, so it
+   lives inside the <label> and inherits its disabled state. */
+
+.field-hint {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1.45;
+  letter-spacing: normal;
+  color: var(--text-dim);
+  max-width: 46ch;
+}
+
+.field-unit {
+  margin-left: 0.35em;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: none;
+}
+
+/* A toggle with a hint is two lines tall, so the box aligns to the first
+   line rather than to the middle of the block. */
+.field.checkbox.toggle {
+  align-items: flex-start;
+  margin-top: 0.85rem;
+}
+
+.field.checkbox.toggle input[type="checkbox"] {
+  margin-top: 0.1rem;
+}
+
+.field.checkbox.toggle.disabled span {
+  color: var(--text-dim);
+}
+
+.mode-help {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.mode-help li + li {
+  margin-top: 0.35rem;
+}
+
+.mode-help strong {
+  color: var(--text);
+}
+
+/* --- sensitive language in the transcript (§29) ---------------------------
+
+   Two different markings that have to stay visually distinct, because they
+   answer different questions and can land on the same word:
+
+   - `mark` is the yellow search hit: "this is what you asked for".
+   - `.flagged` is the lexicon hit: "someone should look at this". It is an
+     underline plus a faint tint rather than a fill, so a search mark can sit
+     *inside* it and both still read.
+
+   `.redacted` replaces the word instead of marking it, and never carries a
+   search highlight — see `SegmentText`. */
+
+.flagged {
+  border-radius: 3px;
+  padding: 0 0.1em;
+  background: var(--warning-soft);
+  /* A wavy underline, not a fill: it is the one marking a reader already
+     associates with "this word has been questioned", and it survives having
+     a yellow search mark painted inside it. */
+  text-decoration: underline wavy var(--warning);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.22em;
+  text-decoration-skip-ink: none;
+  cursor: help;
+}
+
+.flagged.sev-mild {
+  background: transparent;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--text-dim);
+}
+
+.flagged.sev-severe {
+  background: var(--danger-soft);
+  text-decoration-color: var(--danger);
+}
+
+.redacted {
+  border-radius: 4px;
+  padding: 0 0.25em;
+  background: var(--well);
+  border: 1px dashed var(--edge-strong);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  cursor: help;
+}
+
+.redacted.redact {
+  letter-spacing: normal;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+/* A search hit that landed entirely inside a masked span: the turn is in the
+   results for a reason the reader cannot see, so say so. */
+.hidden-match {
+  margin-left: 0.4em;
+  padding: 0 0.4em;
+  border-radius: var(--r-pill);
+  background: var(--well);
+  border: 1px solid var(--edge);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: help;
+}
+
+.redaction-banner {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--r-md);
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-top);
+}
+
+.redaction-banner.quiet {
+  padding: 0.5rem 0.85rem;
+}
+
+.redaction-banner-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.redaction-banner-head button {
+  margin-left: auto;
+  padding: 0.3em 0.8em;
+  font-size: 0.78rem;
+}
+
+.redaction-banner p {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  max-width: 70ch;
+}
+
+.badge.warn {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-color: var(--warning-soft);
+}
+
+/* --- audio quality (§30) --------------------------------------------------
+
+   The payoff for the profiler: a score, the numbers behind it, the level
+   over time, and the named noises. The timeline is 120 divs rather than a
+   chart library — a library would be a dependency, a theme of its own and,
+   in several cases, a web font fetched over a network this app has to work
+   without. */
+
+.quality-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.9rem;
+}
+
+.quality-score {
+  display: flex;
+  align-items: baseline;
+  gap: 0.1em;
+  padding: 0.5rem 1rem;
+  border-radius: var(--r-md);
+  background: var(--well);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-well);
+  font-variant-numeric: tabular-nums;
+}
+
+.quality-score-value {
+  font-size: 2.1rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--text);
+}
+
+.quality-score-max {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.quality-score.success .quality-score-value {
+  color: var(--success);
+}
+
+.quality-score.warn .quality-score-value {
+  color: var(--warning);
+}
+
+.quality-score.error .quality-score-value {
+  color: var(--danger);
+}
+
+.quality-head-text {
+  flex: 1;
+  min-width: 14rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.quality-head-text p {
+  margin: 0;
+}
+
+.quality-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--well);
+  border: 1px solid var(--edge);
+  overflow: hidden;
+}
+
+.quality-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--accent-strong);
+  transition: width var(--t-med) var(--ease);
+}
+
+.quality-bar-fill.success {
+  background: var(--success);
+}
+
+.quality-bar-fill.warn {
+  background: var(--warning);
+}
+
+.quality-bar-fill.error {
+  background: var(--danger);
+}
+
+.quality-grid dd,
+.signals-grid dd {
+  font-variant-numeric: tabular-nums;
+}
+
+.quality-grid dd.metric-note {
+  margin-top: 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.level-timeline {
+  margin-top: 0.4rem;
+}
+
+.level-strip {
+  display: flex;
+  align-items: flex-end;
+  /* No gap: at 120 buckets in a few hundred pixels a 1px flex gap eats a
+     fifth of the width. The hairline between bars is instead an inset on the
+     bars themselves, which costs nothing when they get thin. */
+  gap: 0;
+  height: 4.5rem;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  background: var(--well);
+  border: 1px solid var(--edge);
+  box-shadow: inset 0 1px 0 var(--edge-well);
+  overflow: hidden;
+}
+
+.level-bar {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 1px;
+  height: 100%;
+  cursor: help;
+}
+
+.level-bar-peak,
+.level-bar-rms {
+  position: absolute;
+  left: 0;
+  right: 1px;
+  bottom: 0;
+  border-radius: 1px;
+  min-height: 1px;
+}
+
+/* The peak sits behind the average, so each bar reads as "typically this
+   loud, with transients up to there". */
+.level-bar-peak {
+  background: var(--accent-soft);
+}
+
+.level-bar-rms {
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+.level-bar.clipped .level-bar-peak {
+  background: var(--danger-soft);
+}
+
+.level-bar.clipped .level-bar-rms {
+  background: var(--danger);
+}
+
+.level-axis {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-top: 0.3rem;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.level-axis .muted {
+  font-variant-numeric: normal;
+}
+
+.noise-findings ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: 0.6rem;
+}
+
+.noise-finding {
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--r-md);
+  background: var(--panel-quiet);
+  border: 1px solid var(--edge);
+  box-shadow: var(--sh-ambient-sm), inset 0 1px 0 var(--edge-top);
+}
+
+.noise-finding.clipping {
+  border-color: var(--danger-soft);
+}
+
+.noise-finding-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.noise-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.noise-detail {
+  margin: 0.3rem 0 0;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.noise-advice {
+  margin: 0.3rem 0 0;
+  font-size: 0.76rem;
+  color: var(--accent-2);
+}
+
+.quality-warnings {
+  margin: 0.7rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  color: var(--warning);
+}
+
+.quality-warnings li + li {
+  margin-top: 0.2rem;
+}
+
+/* --- meeting classification (§31) ----------------------------------------- */
+
+.classification-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.35rem;
+}
+
+.classification-label {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.confidence-pill {
+  padding: 0.15em 0.7em;
+  border-radius: var(--r-pill);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.topic-chip {
+  gap: 0.4em;
+  cursor: help;
+}
+
+.topic-count {
+  padding: 0 0.4em;
+  border-radius: var(--r-pill);
+  background: var(--well);
+  color: var(--text-dim);
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .quality-head {
+    gap: 0.6rem;
+  }
+
+  .level-strip {
+    height: 3.5rem;
+  }
 }

@@ -33,6 +33,7 @@ use crate::pipeline::models::SttSegment;
 use crate::pipeline::paths::ModelPaths;
 use crate::pipeline::preprocess;
 use crate::pipeline::proc::StageMetrics;
+use crate::pipeline::stt;
 use crate::pipeline::vad::SpeechSegment;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -234,6 +235,24 @@ pub fn is_worth_blocking(blocks: &[Block]) -> bool {
 
 // --------------------------------------------------------- response parsing
 
+/// One entry of a segment's `words` array.
+///
+/// whisper-server calls these words; they are really *tokens*, exactly the
+/// ones `whisper-cli.exe --output-json-full` writes. A probe of the vendored
+/// `whisper-server.exe` returned `" di"`, `"ar"`, `"ization"` as three
+/// consecutive entries, so [`crate::pipeline::stt::assemble_words`] does the
+/// joining here too rather than this module trusting the field name.
+#[derive(Debug, Deserialize)]
+struct VerboseWord {
+    #[serde(default)]
+    word: String,
+    /// Seconds from the start of the block, like the segment times below.
+    #[serde(default)]
+    start: f64,
+    #[serde(default)]
+    end: f64,
+}
+
 #[derive(Debug, Deserialize)]
 struct VerboseSegment {
     #[serde(default)]
@@ -243,6 +262,11 @@ struct VerboseSegment {
     start: f64,
     #[serde(default)]
     end: f64,
+    /// Absent from older whisper-server builds, which is why this defaults
+    /// rather than being required: a build that cannot report token times
+    /// still transcribes the meeting, it just cannot split a turn mid-segment.
+    #[serde(default)]
+    words: Vec<VerboseWord>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -273,15 +297,27 @@ pub fn parse_block(raw: &str, block: &Block) -> Result<Vec<SttSegment>, String> 
             }
             let start_ms = block.to_original_ms(seconds_to_ms(segment.start));
             let end_ms = block.to_original_ms(seconds_to_ms(segment.end)).max(start_ms);
+            // Token times are block-relative like the segment's, so they go
+            // back onto the recording's timeline through the same clamped
+            // mapping — a word must never be able to land outside the block
+            // it was decoded from.
+            let tokens: Vec<stt::RawToken> = segment
+                .words
+                .iter()
+                .map(|word| {
+                    let start = block.to_original_ms(seconds_to_ms(word.start));
+                    stt::RawToken {
+                        text: &word.word,
+                        start_ms: start,
+                        end_ms: block.to_original_ms(seconds_to_ms(word.end)).max(start),
+                    }
+                })
+                .collect();
             Some(SttSegment {
                 start_ms,
                 end_ms,
                 text,
-                // Left empty on purpose: the single-pass path does not produce
-                // word timestamps either, and nothing downstream reads them
-                // yet — a mode that filled them would make `stt.json` mean two
-                // different things depending on a setting.
-                words: Vec::new(),
+                words: stt::assemble_words(&tokens),
                 language: language.clone(),
             })
         })

@@ -1,12 +1,17 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Cadence",
-  "version": "0.1.0",
+  "version": "0.1.0-rc.1",
   "identifier": "com.cadence.app",
+  "mainBinaryName": "Cadence",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
+    "beforeBundleCommand": {
+      "script": "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/prepare-runtimes.ps1",
+      "cwd": ".."
+    },
     "frontendDist": "../dist"
   },
   "app": {
@@ -21,7 +26,8 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": ["$APPDATA/meetings/**"]
@@ -30,13 +36,40 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "publisher": "Karthik Palani",
+    "copyright": "Copyright (c) 2026 Karthik Palani",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "category": "Productivity",
+    "shortDescription": "Local-first meeting transcription and minutes of meeting",
+    "longDescription": "Cadence records a meeting from a microphone and, entirely on this computer, produces a speaker-labelled transcript and structured minutes of meeting. No cloud services, no telemetry; after the one-time model download it works fully offline.",
+    "resources": {
+      "../vendor/runtimes/": "runtimes/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "signCommand": {
+        "cmd": "powershell",
+        "args": ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", "../scripts/sign.ps1", "%1"]
+      },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "startMenuFolder": "Cadence",
+        "installerIcon": "icons/icon.ico"
+      }
+    }
   }
 }

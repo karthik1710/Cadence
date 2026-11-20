@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 description = "Cadence — local-first meeting transcription and minutes-of-meeting app for Windows."
 license = "MIT"
 edition = "2021"
@@ -9,6 +9,26 @@ edition = "2021"
 default-run = "app"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# The developer CLIs must not ship in the installer. `tauri build` bundles every
+# binary it finds in src/bin, but skips a [[bin]] whose required-features were
+# not passed on its command line; it ignores [features] default. So `dev-cli`
+# is on by default — `cargo run --bin bench_cli …` works as before — while the
+# installer carries only the app. (It also means every folder under src/bin must
+# be a binary's own folder: Tauri treats any entry there as a binary to bundle.)
+[features]
+default = ["dev-cli"]
+dev-cli = []
+
+[[bin]]
+name = "pipeline_cli"
+path = "src/bin/pipeline_cli.rs"
+required-features = ["dev-cli"]
+
+[[bin]]
+name = "bench_cli"
+path = "src/bin/bench_cli/main.rs"
+required-features = ["dev-cli"]
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary

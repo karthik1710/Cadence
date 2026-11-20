@@ -8,17 +8,48 @@
 //!
 //! The version string is recorded in every generated `mom.json` alongside the
 //! model and quantization, so any set of minutes can be traced back to exactly
-//! what produced it.
+//! what produced it. That is also why a superseded template is never deleted:
+//! minutes already on disk name the version that produced them, and a set of
+//! minutes nobody can explain afterwards is worse than one nobody regenerated.
+//! New runs use the `*_VERSION` constants below; [`load`] resolves every
+//! version that has ever shipped.
 
 use std::path::Path;
 
-pub const EXTRACTION_VERSION: &str = "extraction_v1";
-pub const SYNTHESIS_VERSION: &str = "synthesis_v1";
+pub const EXTRACTION_VERSION: &str = "extraction_v2";
+pub const SYNTHESIS_VERSION: &str = "synthesis_v2";
 pub const REPAIR_VERSION: &str = "repair_json_v1";
+/// Bench-only: the experimental transcript-correction pass `bench_cli compare
+/// --llm-cleanup` runs. Nothing in the app pipeline loads it — whether a
+/// cleanup pass helps or quietly rewrites what was said is exactly what that
+/// comparison exists to find out before anything ships.
+pub const CLEANUP_VERSION: &str = "transcript_cleanup_v1";
 
-const EXTRACTION: &str = include_str!("../../../prompts/extraction_v1.txt");
-const SYNTHESIS: &str = include_str!("../../../prompts/synthesis_v1.txt");
-const REPAIR: &str = include_str!("../../../prompts/repair_json_v1.txt");
+/// Every version this binary can resolve, current and retired alike. The tests
+/// sweep it, so a retired template cannot quietly rot into something that no
+/// longer loads or that grew a placeholder nobody fills.
+pub const KNOWN_VERSIONS: [&str; 6] = [
+    "extraction_v1",
+    "extraction_v2",
+    "synthesis_v1",
+    "synthesis_v2",
+    "repair_json_v1",
+    "transcript_cleanup_v1",
+];
+
+const EXTRACTION_V1: &str = include_str!("../../../prompts/extraction_v1.txt");
+/// v2 carries the redaction contract, in two halves: do not reproduce
+/// offensive language in a summary even where the transcript shows it, and
+/// treat runs of `*` and `[expunged]` as deliberate masking to be preserved
+/// rather than guessed at or "corrected". It is the belt to `mom.rs`'s braces —
+/// that module masks the transcript *before* it is chunked, so the model
+/// normally never sees the words at all, but a prompt costs nothing and covers
+/// the case where a term is not in the lexicon.
+const EXTRACTION_V2: &str = include_str!("../../../prompts/extraction_v2.txt");
+const SYNTHESIS_V1: &str = include_str!("../../../prompts/synthesis_v1.txt");
+const SYNTHESIS_V2: &str = include_str!("../../../prompts/synthesis_v2.txt");
+const REPAIR_V1: &str = include_str!("../../../prompts/repair_json_v1.txt");
+const CLEANUP_V1: &str = include_str!("../../../prompts/transcript_cleanup_v1.txt");
 
 /// Loads a prompt template by version name, preferring a user override.
 pub fn load(data_dir: Option<&Path>, version: &str) -> Result<String, String> {
@@ -29,10 +60,16 @@ pub fn load(data_dir: Option<&Path>, version: &str) -> Result<String, String> {
                 .map_err(|e| format!("could not read {}: {e}", override_path.display()));
         }
     }
+    // Matched on literal names rather than on the `*_VERSION` constants: those
+    // move whenever a prompt is revised, and a `mom.json` recording the old
+    // name has to keep resolving to the template that actually produced it.
     match version {
-        EXTRACTION_VERSION => Ok(EXTRACTION.to_string()),
-        SYNTHESIS_VERSION => Ok(SYNTHESIS.to_string()),
-        REPAIR_VERSION => Ok(REPAIR.to_string()),
+        "extraction_v1" => Ok(EXTRACTION_V1.to_string()),
+        "extraction_v2" => Ok(EXTRACTION_V2.to_string()),
+        "synthesis_v1" => Ok(SYNTHESIS_V1.to_string()),
+        "synthesis_v2" => Ok(SYNTHESIS_V2.to_string()),
+        "repair_json_v1" => Ok(REPAIR_V1.to_string()),
+        "transcript_cleanup_v1" => Ok(CLEANUP_V1.to_string()),
         other => Err(format!("unknown prompt version: {other}")),
     }
 }
@@ -54,7 +91,7 @@ mod tests {
 
     #[test]
     fn embedded_prompts_are_present_and_substantial() {
-        for v in [EXTRACTION_VERSION, SYNTHESIS_VERSION, REPAIR_VERSION] {
+        for v in KNOWN_VERSIONS {
             let text = load(None, v).unwrap();
             assert!(text.len() > 200, "{v} looks empty");
         }
@@ -77,7 +114,7 @@ mod tests {
             "SCHEMA",
             "INVALID",
         ];
-        for v in [EXTRACTION_VERSION, SYNTHESIS_VERSION, REPAIR_VERSION] {
+        for v in KNOWN_VERSIONS {
             let text = load(None, v).unwrap();
             for (index, _) in text.match_indices("{{") {
                 let rest = &text[index + 2..];
@@ -97,6 +134,43 @@ mod tests {
     #[test]
     fn leaves_unknown_placeholders_visible() {
         assert_eq!(fill("{{MISSING}}", &[("X", "1")]), "{{MISSING}}");
+    }
+
+    #[test]
+    fn the_retired_v1_prompts_still_resolve_by_name() {
+        // Every `mom.json` on disk names the version that produced it. If a
+        // retired template stopped loading, those minutes would become
+        // unexplainable and could never be regenerated under their own rules.
+        assert!(load(None, "extraction_v1").unwrap().contains("{{TRANSCRIPT}}"));
+        assert!(load(None, "synthesis_v1").unwrap().contains("{{FACTS}}"));
+        assert_ne!(
+            load(None, "extraction_v1").unwrap(),
+            load(None, "extraction_v2").unwrap()
+        );
+        assert_ne!(
+            load(None, "synthesis_v1").unwrap(),
+            load(None, "synthesis_v2").unwrap()
+        );
+    }
+
+    #[test]
+    fn the_current_templates_carry_the_redaction_contract() {
+        assert_eq!(EXTRACTION_VERSION, "extraction_v2");
+        assert_eq!(SYNTHESIS_VERSION, "synthesis_v2");
+        for v in [EXTRACTION_VERSION, SYNTHESIS_VERSION] {
+            let text = load(None, v).unwrap();
+            assert!(
+                text.contains("[expunged]"),
+                "{v} never explains what a redaction looks like"
+            );
+            assert!(
+                text.to_lowercase().contains("offensive"),
+                "{v} does not forbid reproducing flagged language"
+            );
+        }
+        // ...and the retired ones do not, which is the whole reason for the
+        // bump: minutes generated under v1 were not held to this.
+        assert!(!load(None, "extraction_v1").unwrap().contains("[expunged]"));
     }
 
     #[test]

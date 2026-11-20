@@ -15,6 +15,11 @@ The installer carries **no model weights**. They are several gigabytes of data, 
 
 ## Producing a release
 
+There are two ways to produce the installer:
+
+- **In CI**, `.github/workflows/release.yml` on GitHub-hosted runners. This is the route for published releases. It signs through SignPath Foundation once the project is accepted there, and it produces an unsigned, clearly labelled build until then. See [Release builds in CI](#release-builds-in-ci).
+- **Locally**, `npm run release` with a certificate you hold (below). It stays useful for a test build, or if the project ever gets its own certificate.
+
 ```powershell
 npm run release
 ```
@@ -27,6 +32,8 @@ npm run release
 4. The NSIS bundler. Each file to be signed goes through `bundle.windows.signCommand`, which is `scripts/sign.ps1`. That covers the app executable and every bundled `.exe`/`.dll` that does not already carry a valid signature (Tauri checks with `signtool verify /pa`; files `prepare-runtimes.ps1` already signed pass). It then signs the uninstaller and the finished installer.
 
 Under `CADENCE_REQUIRE_SIGNING=1`, any file that cannot be given a trusted signature fails the build. For a local, unsigned test build, run `npm run tauri build` instead: the same steps run, but `sign.ps1` warns and leaves each file unsigned.
+
+One signing step does not stop the build on its own when it fails: the uninstaller's. Tauri signs it from inside `makensis` through NSIS's `!uninstfinalize`, and `makensis` ignores that command's exit code (checked with NSIS 3.11). So `release.mjs` also sets `CADENCE_SIGN_FAILURE_LOG`, `sign.ps1` appends every failure to that file, and `release.mjs` fails the release if anything is in it, even when `tauri build` itself reported success.
 
 ### `scripts/prepare-runtimes.ps1`
 
@@ -65,6 +72,7 @@ Nothing secret lives in the repository. `scripts/sign.ps1` reads the identity fr
 | `CADENCE_SIGN_TIMESTAMP_URL` | Optional RFC 3161 timestamp server. The default is DigiCert's for a certificate and Microsoft's for Trusted Signing. |
 | `CADENCE_SIGNTOOL` | Optional full path to `signtool.exe`. The default is the newest x64 `signtool` in the Windows SDK. |
 | `CADENCE_REQUIRE_SIGNING=1` | Fail instead of warning when no identity is configured, or when a signature does not chain to a trusted root. `npm run release` sets it. |
+| `CADENCE_SIGN_FAILURE_LOG` | A file each signing failure is appended to. `npm run release` sets it and fails if anything was written (see above). |
 
 Every signature is SHA-256 and **timestamped**. A timestamp keeps the signature valid after the certificate expires, which matters most for Trusted Signing's short-lived certificates. `sign.ps1` retries a failed timestamp request before giving up. A file that already carries a valid signature is left alone, so an upstream publisher's signature would be kept. No file Cadence bundles today has one.
 
@@ -85,7 +93,93 @@ It cannot guarantee anything about a particular security product:
 - **Model downloads remain.** First-run setup still fetches model data files with `curl.exe` and `tar.exe` (`tar.exe` unpacks the diarization model archive). These are data, not code, but how an EDR product reacts to a desktop app spawning `curl.exe` is untested ([roadmap.md](roadmap.md) risk 16).
 - **Signing proves origin, not safety.** A signature says the files came from whoever holds the key. It says nothing about the upstream builds themselves, which are pinned by hash but not independently attested (risk 5).
 
-No signing identity has been obtained for Cadence yet. Until one is, every build is unsigned, and none of the reputation benefits above apply.
+No signing identity has been obtained for Cadence yet. Until one is, every build is unsigned, and none of the reputation benefits above apply. The plan is SignPath Foundation's free open-source signing, through the CI pipeline below. Under it, the bundled runtimes stay unsigned (SignPath Foundation's terms forbid signing upstream binaries), so only the installer, the app executable and the uninstaller carry a signature. Whether endpoint-security products treat the unsigned runtime DLLs inside a signed installer differently from fully signed ones is untested.
+
+## Release builds in CI
+
+`.github/workflows/release.yml` builds the per-user NSIS installer on GitHub-hosted Windows runners. It runs on a pushed `v*` tag, or by hand from Actions → Release → Run workflow, which takes two inputs. `sign` submits the build to SignPath. `release_tag` (default branch only) also publishes a GitHub prerelease under that tag, for example `v0.1.0-rc.1`. The workflow never runs for pull requests. A tag must equal `v` plus the version in `src-tauri/tauri.conf.json`, and that version must match `package.json`, or the run stops before building.
+
+The checks for every push to `main` and every pull request are a separate workflow, `.github/workflows/ci.yml`: `npx tsc --noEmit`, `npm run build`, `cargo build --locked` and `cargo test --locked` (including the offline-guarantee suite) on `windows-latest`. Neither workflow needs models, and neither needs anything in `vendor/runtimes/` beyond the committed README, except that the release build fills it through `prepare-runtimes.ps1` as usual.
+
+### Why SignPath Foundation, and what it allows
+
+The maintainer is an individual without a code-signing certificate, and Azure Trusted Signing is not available to them. [SignPath Foundation](https://signpath.org) offers free code signing to open-source projects. The certificate is issued to SignPath Foundation, so Windows shows SignPath Foundation as the publisher, and signing runs through [SignPath.io](https://about.signpath.io). The conditions that shape this pipeline, from [signpath.org/terms](https://signpath.org/terms):
+
+- **Only the project's own binaries.** "The team must only sign software artifacts built from their own source code", and "upstream OSS projects' binaries must not be signed using your subscription, but may be included in signed packages and installers". So the bundled whisper.cpp, llama.cpp and sherpa-onnx files, and NSIS's own plugin DLLs, are never sent to SignPath. They ship unsigned inside the signed installer. `prepare-runtimes.ps1` runs without a signing identity in CI, so `runtimes/manifest.json` describes those unsigned bytes and the installed app's Verify still matches. The terms add: "we reserve the right to require that signed packages only include signed program and library files in the future". That would need the upstream projects to sign their releases.
+- **Verifiable builds, manual approval.** Builds must run on a trusted build system (GitHub-hosted runners), SignPath verifies each artifact's origin (repository, commit, workflow run), and "every release needs manual approval for signing".
+- **Metadata restrictions.** Every signed file must have its product name restricted to the project's name, and its product version restricted to the same value across the build. Tauri stamps `Cadence` and the `tauri.conf.json` version on `Cadence.exe`, the uninstaller and the installer, and the artifact configurations enforce both.
+- **Project obligations.** An OSI license with no proprietary components, MFA for every team member on GitHub and SignPath, a published [code signing policy](code-signing-policy.md) naming the team roles, a privacy statement, and the attribution "Free code signing provided by SignPath.io, certificate by SignPath Foundation".
+
+### Why the installer is bundled twice
+
+Tauri signs synchronously while it bundles. It calls `signCommand` once per file: the app executable (after patching a package-type marker into it), every unsigned `.exe`/`.dll` resource, NSIS's plugin DLLs, the uninstaller (from inside `makensis`, through `!uninstfinalize`) and the finished installer. SignPath signs a whole GitHub artifact asynchronously, behind a manual approval. It cannot answer a per-file call, and it cannot reach inside an NSIS installer, because it has no NSIS container format. The workflow therefore runs Tauri's bundler twice, with `src-tauri/tauri.ci.conf.json` pointing `signCommand` at `scripts/ci-sign-hook.ps1`:
+
+| Job | Runner | What it does |
+|---|---|---|
+| `build` | windows-latest | `tauri build` in **collect** mode. The hook signs nothing. It copies Cadence's own binaries, the patched `Cadence.exe` and the uninstaller, under fixed names and records the SHA-256 of each. Its installer is the unsigned build and is always uploaded. |
+| `sign-binaries` | ubuntu-latest | SignPath signs `Cadence.exe` and `uninstall.exe` (artifact configuration `cadence-binaries`). |
+| `bundle` | windows-latest | `tauri bundle` in **apply** mode, from the same unpatched `Cadence.exe`. When Tauri asks to sign a file whose SHA-256 matches one SignPath signed, the hook puts the signed copy in its place, so the installer embeds a signed app and a signed uninstaller. |
+| `sign-installer` | ubuntu-latest | SignPath signs `Cadence_<version>_x64-setup.exe` (artifact configuration `cadence-installer`). |
+| `finalize` | windows-latest | Verifies the final installer and writes `SHA256SUMS.txt`. |
+| `release` | ubuntu-latest | When a tag was given: a SLSA build provenance attestation (`actions/attest`) for the installer, then a GitHub prerelease with the installer and `SHA256SUMS.txt`. |
+
+The second pass works because both of Cadence's own binaries are reproducible from the same inputs. Tauri's patch is a fixed byte substitution in the unpatched executable. `makensis` wrote a byte-identical uninstaller across runs, directories and `TEMP` folders when tested with NSIS 3.11 on 2026-11-20. Every mismatch fails the build rather than shipping an unsigned file:
+
+- In apply mode, with `CADENCE_CI_SIGN_STRICT=1`, the hook fails if a binary's SHA-256 matches nothing SignPath signed, or if the signed copy is not validly signed, is not timestamped, or is signed by someone other than `SIGNPATH_EXPECTED_SIGNER`.
+- `makensis` ignores the uninstaller hook's exit code, so the hook also appends each replacement to `applied.txt`. `scripts/ci-verify-installer.ps1` then fails unless every collected binary was replaced.
+- `ci-verify-installer.ps1` also checks the installer's own signature state: unsigned in the build job, signed in `finalize` when signing ran. It then unpacks the installer with 7-Zip. Inside, `Cadence.exe` must carry the expected signature state, every runtime file must match `runtimes\manifest.json` with no extras, and `pipeline_cli`/`bench_cli` must be absent.
+- Any file the hook cannot classify fails the build. That means a Tauri update started signing something new, and the hook has to be taught whether it is Cadence's or upstream's.
+
+The SignPath API token is visible only to the two signing jobs, which run SignPath's action and no repository code. The build jobs, which run `npm ci`, Cargo build scripts and `prepare-runtimes.ps1`, never see it. Every third-party action is pinned to a full commit SHA; `.github/dependabot.yml` proposes monthly updates. Release builds use no build cache.
+
+### Without SignPath
+
+If the trigger does not ask for signing, or the repository variables below are not set, the signing, second bundle and SignPath jobs are skipped. `finalize` verifies the first pass's installer as **unsigned** and uploads it as the `Cadence-<version>-unsigned` artifact. On a tag, the prerelease is titled "(unsigned test build)" and its notes say so. A signing run that fails publishes nothing.
+
+### Configuration
+
+Repository **variables** (Settings → Secrets and variables → Actions → Variables):
+
+| Variable | Required | Default | Meaning |
+|---|---|---|---|
+| `SIGNPATH_ORGANIZATION_ID` | yes | none | SignPath organization ID. Signing is enabled only when it and the project slug are set. |
+| `SIGNPATH_PROJECT_SLUG` | yes | none | SignPath project slug. |
+| `SIGNPATH_SIGNING_POLICY_SLUG` | no | `release-signing` | Signing policy used for both requests. |
+| `SIGNPATH_BINARIES_CONFIG_SLUG` | no | `cadence-binaries` | Artifact configuration for `Cadence.exe` + `uninstall.exe`. |
+| `SIGNPATH_INSTALLER_CONFIG_SLUG` | no | `cadence-installer` | Artifact configuration for the installer. |
+| `SIGNPATH_EXPECTED_SIGNER` | no | `SignPath Foundation` | Substring the signer certificate's subject must contain. |
+| `SIGNPATH_WAIT_SECONDS` | no | `7200` | How long each signing job waits for the manual approval. |
+
+The **secret** `SIGNPATH_API_TOKEN` is the API token of a SignPath user with submitter rights on the project and policy. Store it as a secret of the `signpath` environment that both signing jobs use (Settings → Environments), with deployment restricted to `main` and `v*` tags, so that a workflow on any other branch cannot use it. A repository secret also works.
+
+The artifact configurations are versioned in `.github/signpath/artifact-configurations/`. SignPath does not read them from the repository, so after changing one, paste it into the SignPath project again.
+
+### Setting up SignPath (maintainer)
+
+1. Enable MFA on GitHub, and later on SignPath.
+2. Fill in and publish [code-signing-policy.md](code-signing-policy.md): confirm the team roles and the privacy statement, and link it from the README as "Code signing policy".
+3. Publish at least one release in the form to be signed. SignPath Foundation accepts only projects that are already released. An unsigned prerelease from this workflow (run it with `release_tag`) is that form.
+4. Apply at [signpath.org/apply](https://signpath.org/apply) with the repository URL, the license (MIT) and a link to the policy page. This is the maintainer's own decision and action.
+5. Once accepted, in SignPath:
+   - make sure the project's repository URL is `https://github.com/karthik1710/Cadence` and that the predefined trusted build system *GitHub.com* is linked to it;
+   - add the two artifact configurations from `.github/signpath/artifact-configurations/` with the slugs `cadence-binaries` and `cadence-installer`;
+   - use a `release-signing` policy with origin verification and manual approval by the approvers in the policy page. Restrict it to the refs releases are built from. SignPath's documentation shows branch patterns such as `main` and `release/*`, but does not say whether a tag ref matches. If tag-triggered runs are refused, release by running the workflow by hand on `main` with `release_tag` set;
+   - create an API token for a user who is a submitter on that policy.
+6. In GitHub, set the variables and the secret above.
+7. Run the workflow by hand on `main` with `sign` ticked and no `release_tag`. Approve both signing requests in SignPath, then download the `Cadence-<version>-signed` artifact and check it as in [Verifying a build](#verifying-a-build). Then release by tag, or by hand with `release_tag`.
+8. Change the status in `code-signing-policy.md` and enable the README's signing note.
+
+Each signed release needs two approvals in SignPath, one for the binaries and one for the installer, because the installer cannot exist until the signed binaries are inside it.
+
+### Verifying a CI release
+
+```powershell
+gh attestation verify Cadence_0.1.0-rc.1_x64-setup.exe --repo karthik1710/Cadence   # built by this repository's workflow
+Get-FileHash Cadence_0.1.0-rc.1_x64-setup.exe -Algorithm SHA256                       # compare with SHA256SUMS.txt
+Get-AuthenticodeSignature Cadence_0.1.0-rc.1_x64-setup.exe | Format-List Status, SignerCertificate, TimeStamperCertificate
+```
+
+A signed release reports `Valid` with a SignPath Foundation certificate and a timestamp. The checks under [Verifying a build](#verifying-a-build) apply too, except that the runtime files are expected to be unsigned in a SignPath-signed build.
 
 ## Install location
 

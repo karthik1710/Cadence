@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration, slug "cadence-binaries" (repository
+  variable SIGNPATH_BINARIES_CONFIG_SLUG overrides the slug).
+
+  Signs Cadence's own binaries before they go into the installer: the app
+  executable (as patched by Tauri for the NSIS package) and the NSIS
+  uninstaller. .github/workflows/release.yml uploads them as a GitHub artifact
+  zip holding exactly these two files at its root; scripts/ci-sign-hook.ps1
+  collects them during the first bundling pass.
+
+  Nothing else is signed. SignPath Foundation's terms forbid signing upstream
+  binaries under this project's certificate (https://signpath.org/terms), so
+  the bundled whisper.cpp / llama.cpp / sherpa-onnx files and NSIS's plugin
+  DLLs never reach SignPath; they ship unsigned inside the signed installer,
+  which the same terms allow.
+
+  The metadata restrictions are the ones the terms require: product name set
+  to the project's name, product version identical across the build. The
+  workflow passes `version` from src-tauri/tauri.conf.json.
+
+  This file is the reviewed source of truth. SignPath does not read it from
+  the repository: paste it into the project's artifact configuration, and keep
+  the two in step.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file-set product-name="Cadence" product-version="${version}">
+      <include path="Cadence.exe" />
+      <include path="uninstall.exe" />
+      <for-each>
+        <authenticode-sign description="Cadence" description-url="https://github.com/karthik1710/Cadence" />
+      </for-each>
+    </pe-file-set>
+  </zip-file>
+</artifact-configuration>

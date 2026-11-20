@@ -4,9 +4,9 @@ Which models Cadence runs, what has actually been measured, what has not, and ho
 
 ## Read this first: what is and isn't measured
 
-**Two real recordings have been measured, plus one LLM memory number.** A 57.4-second English recording (laptop mic, two speakers, one heavily dominant, unlabelled) produced the thread-scaling and end-to-end numbers below. A second, 26-second two-speaker recording (also unlabelled beyond "two people") was run through `bench_cli diarize` after the default cluster threshold was found to be silently merging real speakers — see the Diarization section below. Separately, llama-server's working set was measured with and without a q8_0 KV cache — on Qwen3-**4B**, not the 8B that now ships (see [LLM](#llm--llamacpp)). Since 2026-10-05 there is more, all of it English: two caption-referenced public clips (the [baseline set](#baseline-regression-test-baseline)) have been through the shipped pipeline up to the transcript, and on 2026-10-06 a 16 GB hybrid laptop (i7-1260P) was swept for thread scaling on STT, diarization and — on a Qwen3-4B stand-in — the LLM ([below](#thread-scaling-on-a-hybrid-laptop-cpu-i7-1260p-2026-10-06)). On 2026-11-19 the same laptop gave the first in-app run (a 28 s recording, through to the transcript) and a controlled STT A/B that shows **every STT timing in this document before that date was measured with whisper.cpp loading llama.cpp's ggml DLLs by accident**, a configuration that no longer ships and was ~32% faster than the one that does ([below](#runtime-isolation-and-the-first-in-app-run-2026-11-19)).
+**Two real recordings have been measured, plus one LLM memory number.** A 57.4-second English recording (laptop mic, two speakers, one heavily dominant, unlabelled) produced the thread-scaling and end-to-end numbers below. A second, 26-second two-speaker recording (also unlabelled beyond "two people") was run through `bench_cli diarize` after the default cluster threshold was found to be silently merging real speakers — see the Diarization section below. Separately, llama-server's working set was measured with and without a q8_0 KV cache — on Qwen3-**4B**, not the 8B that now ships (see [LLM](#llm--llamacpp)). Since 2026-10-05 there is more, all of it English: two caption-referenced public clips (the [baseline set](#baseline-regression-test-baseline)) have been through the shipped pipeline up to the transcript, and on 2026-10-06 a 16 GB hybrid laptop (i7-1260P) was swept for thread scaling on STT, diarization and — on a Qwen3-4B stand-in — the LLM ([below](#thread-scaling-on-a-hybrid-laptop-cpu-i7-1260p-2026-10-06)). On 2026-11-19 the same laptop gave the first in-app run (a 28 s recording, through to the transcript) and a controlled STT A/B that shows **every STT timing in this document before that date was measured with whisper.cpp loading llama.cpp's ggml DLLs by accident**, a configuration that no longer ships and was ~32% faster than the one that does ([below](#runtime-isolation-and-the-first-in-app-run-2026-11-19)). On 2026-11-20 the shipped Qwen3-8B ran for the first time, on that laptop, twice, with RAM sampled every second, and `llama-bench` swept its thread count ([below](#qwen3-8b-on-a-16-gb-laptop-2026-11-20)).
 
-**The top unmeasured risk is the LLM itself.** Cadence now runs Qwen3-8B Q4_K_M on every machine, with a 16 GB minimum. **The 8B has never been run on any machine here**, and nobody has measured on a real 16 GB machine its peak RAM, its generation time for a 60-minute meeting, or whether it fits alongside Windows, the webview and the page cache at all. The whole single-model-set decision rests on an estimate (~6 GB at 8K context, against a 7,000 MB advisory budget). The one real data point so far is a refusal: on a 16 GB laptop with ordinary apps open, `preflight_memory` found 4.9–6.1 GB free against the 7.55 GB it needs and did not start the model ([below](#runtime-isolation-and-the-first-in-app-run-2026-11-19)).
+**The LLM fits 16 GB; the open question is its speed.** Cadence runs Qwen3-8B Q4_K_M on every machine, with a 16 GB minimum. On 2026-11-20, on the 16 GB i7-1260P with ordinary apps open, it produced valid minutes from 6,287 MB free and again from 4,822 MB free, and `preflight_memory` was relaxed to match (it now asks for ~4,852 MB free, not 7,550 MB). On that CPU it is slow: prompt evaluation ran at 8–11 tok/s and generation at 2.5–3.1 tok/s, and it is about half the speed of a 4B. Minutes calls are prompt-dominated, so a 60-minute meeting's minutes would take far longer than the 5–10 minute target on this hardware. That is implied by the rates, not measured: no long meeting has been through the 8B, and its minutes quality has not been scored ([below](#qwen3-8b-on-a-16-gb-laptop-2026-11-20)).
 
 **Nothing else has been benchmarked.** The newer `bench_cli setup`/`compare` modes and the [bench recording guide](bench-recording-guide.md) exist to close this gap on one purpose-made recording, which has not been made yet (`compare` has run only on the public council clip). The original `bench_cli` — the harness for Phases 2 (STT), 3 (diarization), 6 (LLM), and 14 (full pipeline) — was written and unit-tested to the level `cargo test` reaches; Phase 3 (diarization) has now been run against real audio several times and Phase 2 (STT) as a thread sweep, while `llm` and `full` **have never been executed against real audio**. There are no 30/45/60-minute meeting results, no Tamil or code-switched results, no labelled-speaker-count results, and no LLM quality scores. **WER exists for two English clips only**: 16.7% on the council news clip, against non-verbatim live captions and so an upper bound, and 2.8% on the TED talk, against professional captions. That says `whisper-small` is not broken on English; it says nothing about Tamil or Tanglish.
 
@@ -54,7 +54,7 @@ Tuned stage split: preprocess ~1.2s, diarization ~7.6s, STT ~5.6s, alignment neg
 
 Levers not yet tried, roughly by expected value: a longer real recording (to see how much cost is fixed overhead); whisper.cpp `-p` alongside `-t`; a smaller/quantized STT model if `small` is the bottleneck at scale (trades accuracy — score it before adopting); Intel SYCL/iGPU offload (optional — CPU stays the baseline).
 
-**Not measured at all:** peak RAM, peak CPU, and thermals per stage (all three are required); the shipped LLM's generation speed and memory (the only LLM numbers are the KV-cache comparison below and the hybrid-laptop sweep, both on a different model); anything not English. Everything in this subsection is from the 32 GB reference machine, which is no longer the minimum; the 16 GB numbers are in the next one.
+**Not measured at all:** peak RAM, peak CPU, and thermals per stage (all three are required); the shipped LLM's generation speed and memory on this machine (the 8B has been measured only on the 16 GB laptop, [below](#qwen3-8b-on-a-16-gb-laptop-2026-11-20)); anything not English. Everything in this subsection is from the 32 GB reference machine, which is no longer the minimum; the 16 GB numbers are in the next one.
 
 ### Thread scaling on a hybrid laptop CPU (i7-1260P, 2026-10-06)
 
@@ -79,7 +79,7 @@ Levers not yet tried, roughly by expected value: a longer real recording (to see
 
 Flat from 2 to 8 within run-to-run noise (three runs at 4 threads span 16.0–21.6 s), slower past 8, and ~1.6× slower at 16. The existing cap of 8 is right here too; nothing changed.
 
-**LLM — on a stand-in.** The shipped Qwen3-8B was **not installed on this machine** (risk 17 in [roadmap.md](roadmap.md)) and is **not measured**; these are Qwen3-4B Q4_K_M, with flash attention and q8_0 KV. First, `llama-bench` at empty context:
+**LLM — on a stand-in.** The shipped Qwen3-8B was **not installed on this machine** at the time (risk 17 in [roadmap.md](roadmap.md)); it was measured later ([2026-11-20](#qwen3-8b-on-a-16-gb-laptop-2026-11-20)). These are Qwen3-4B Q4_K_M, with flash attention and q8_0 KV. First, `llama-bench` at empty context:
 
 | threads | 4 | 6 | 8 | 12 | 14 |
 |---|---|---|---|---|---|
@@ -101,7 +101,7 @@ Empty context is not the pipeline's workload, so the deciding run was `llama-ser
 
 **The conclusion that matters: thread count is not the lever on laptop-class hardware, and the i9's "STT scales to 24" does not carry over.** On this part STT is flat 4–16, diarization flat to 8 and worse beyond, and the LLM best at the P-core count.
 
-**Prefill is the minutes bottleneck.** At ~12 tok/s at depth, an ~5K-token chunk costs 6–7 minutes of prefill per call before a single token is generated — and that is the 4B; the 8B has roughly twice the weights and has not been run. On 16 GB laptop-class hardware it is minutes generation, not STT, that puts a 60-minute meeting far outside the 5–10 minute target. An earlier run of the full 11:44 TED clip on this machine, before the thread change, agrees: the pipeline up to the transcript took 600.7 s (0.85x realtime, STT alone 0.57x), and minutes with Qwen3-4B at 14 threads took **7,042 s** — a figure contaminated by builds running concurrently, so an overstatement, but not by a factor that rescues the target.
+**Prefill is the minutes bottleneck.** At ~12 tok/s at depth, an ~5K-token chunk costs 6–7 minutes of prefill per call before a single token is generated — and that is the 4B; the 8B has roughly twice the weights (measured on 2026-11-20 at about half the 4B's speed, [below](#qwen3-8b-on-a-16-gb-laptop-2026-11-20)). On 16 GB laptop-class hardware it is minutes generation, not STT, that puts a 60-minute meeting far outside the 5–10 minute target. An earlier run of the full 11:44 TED clip on this machine, before the thread change, agrees: the pipeline up to the transcript took 600.7 s (0.85x realtime, STT alone 0.57x), and minutes with Qwen3-4B at 14 threads took **7,042 s** — a figure contaminated by builds running concurrently, so an overstatement, but not by a factor that rescues the target.
 
 ### Runtime isolation and the first in-app run (2026-11-19)
 
@@ -134,7 +134,42 @@ Read the timings with the run conditions in mind: the app was running in dev mod
 
 **The first in-app run.** Under `npm run tauri dev`, driven through the UI: a 28 s recording from the laptop's built-in Intel mic array went preprocess → GTCRN → Silero VAD → diarization → STT → align → classification → redaction scan to a transcript in ~45 s, and ~58 s on a re-run (wall times read from the app, not from `metrics.json`; one short, quiet, single-voice recording, so they say the path works, not how fast a meeting is).
 
-**The LLM was refused, not measured.** Both times, `preflight_memory` refused Qwen3-8B: 4,921 MB free, then 6,079 MB, against the 7,550 MB it needs (6,050 MB estimated for the model at 8,192 context, plus 1,500 MB headroom). Settings showed 1.0 GB free at one point. **No LLM timing or peak-RAM figure exists for the 8B**; the only llama.cpp binary exercised from its own folder was `llama-server.exe --version` (build 10717). What the run does establish is that a 16 GB laptop with ordinary apps open did not have the free RAM the check asks for ([roadmap.md](roadmap.md) risk 14).
+**The LLM was refused, not measured.** Both times, `preflight_memory` refused Qwen3-8B: 4,921 MB free, then 6,079 MB, against the 7,550 MB the rule of the day asked for (6,050 MB estimated for the model at 8,192 context, plus 1,500 MB headroom). Settings showed 1.0 GB free at one point. *That rule was replaced the next day:* the 8B ran to valid minutes from less free RAM than either refusal saw, and the check now asks for ~4,852 MB ([below](#qwen3-8b-on-a-16-gb-laptop-2026-11-20)).
+
+### Qwen3-8B on a 16 GB laptop (2026-11-20)
+
+**The first time the shipped 8B has run on any machine.** **Machine:** the same i7-1260P (4 P-cores with SMT plus 8 E-cores, 16 logical, LPDDR5-4800, 16,008 MB), the owner's laptop with ordinary apps open, not a quiet machine. **Model:** the shipped Qwen3-8B Q4_K_M file, 8,192-token context, q8_0 KV cache, llama.cpp b10717, 8 threads (the hybrid default).
+
+**Method.** `bench_cli compare <meeting-id> --variants shipped,whisper-small --llm-file <Qwen3-8B-Q4_K_M.gguf>`, on a meeting recorded in the app. `compare` generates the minutes with the app's own `mom::generate` from the `shipped` transcript. The model was passed as an ad-hoc `--llm-file`, which skips `preflight_memory`; that was deliberate, because under the rule of the day the check would have refused both runs. Alongside, a sampler recorded once a second `llama-server.exe`'s working set and private bytes, the system's available RAM and hard page-ins. The transcript fit in one chunk, and each call was ~930 prompt tokens against ~90 generated.
+
+| run | free RAM at start | load | generate | chunks / failed / repaired | minutes | `llama-server` working set | private | available RAM during |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 6,287 MB | 27.0 s | 236.9 s | 1 / 0 / 0 | valid | peak 8,349 MB | ~4,146 MB | fell to ~400 MB, recovered to ~1.9 GB |
+| 2 (memory pressure) | 4,822 MB | 40.0 s | 289.7 s | 1 / 0 / 0 | valid | ~4.7–5.2 GB | ~4.1 GB | ~150–400 MB |
+
+- **Run 1.** Windows made room by trimming other applications' working sets: available RAM fell to ~400 MB, then recovered to ~1.9 GB later in the run. Hard page-ins were mostly zero during generation, with bursts at load, so the run did not thrash. The 8,349 MB peak working set is above both the ~6,050 MB estimate and the 7,000 MB advisory budget. Most of the difference is file-backed pages of the memory-mapped weights, which Windows can drop and re-read; private memory stayed at ~4.1 GB.
+- **Run 2.** A helper process held 4.6 GB, so the run started at 4,822 MB free. Windows held `llama-server`'s working set at ~4.7–5.2 GB, leaving part of the weights on disk, and the run was ~20% slower (load 40.0 s against 27.0 s, generate 289.7 s against 236.9 s). The minutes were still valid.
+- **llama-server's own timings (8 threads), across the calls:** prompt evaluation 8.2–11.4 tok/s, generation 2.5–3.1 tok/s.
+
+**What changed in the code.** `preflight_memory` used to require the estimate plus 1,500 MB of headroom (7,550 MB free for the 8B at 8K), which would have refused both runs. It now requires the estimate minus a quarter of the model file, the share Windows was seen to keep on disk without the run thrashing, and no headroom: 6,050 − 1,198 = **4,852 MB free**. That is 30 MB above run 2's starting point, so a machine in exactly run 2's state is still refused. Below the lowest point measured to work is untested, so it stays refused ([architecture.md](architecture.md#one-model-set-16-gb-minimum)).
+
+**Thread count: `llama-bench`** (b10717, pp128 / tg32, `-fa 1`, q8_0 KV), tok/s, same laptop:
+
+| threads | 4 | 6 | 8 | 12 | 16 |
+|---|---|---|---|---|---|
+| Qwen3-8B Q4_K_M, prompt (pp128) | 9.96 | 11.91 | 11.93 | 12.54 | 12.46 |
+| Qwen3-8B Q4_K_M, generation (tg32) | 4.79 | 4.16 | 4.01 | 3.36 | 3.15 |
+| Qwen3-4B Q4_K_M, prompt (pp128) | 21.60 | — | 22.58 | 23.78 | — |
+| Qwen3-4B Q4_K_M, generation (tg32) | 8.64 | — | 7.39 | 6.45 | — |
+
+The Qwen3-4B file was a retired model left on this machine's disk from the tiered builds ([roadmap.md](roadmap.md) risk 17). It was run only for comparison and is not a candidate in the catalog.
+
+**Reading it.**
+
+- **8 threads is about optimal for minutes on this chip.** Prompt throughput is nearly flat from 6 threads up, while generation falls as threads rise. With ~930 prompt tokens and ~90 generated per call, the `llama-bench` rates put a call at ~100 s for 6, 8 or 12 threads, ~103 s at 16 and ~112 s at 4. That is arithmetic on the table, not a timed run. The hybrid default of 8 stands.
+- **The CPU is the limit, and the 8B is about half the speed of a 4B**: 11.93 against 22.58 tok/s prompt and 4.01 against 7.39 generation at 8 threads. Memory was not the limit once the run started, even under pressure in run 2.
+- **The real runs were slower than `llama-bench`** (8.2–11.4 tok/s prompt, against 11.93 at 8 threads), as expected for a full prompt on a machine doing other work.
+- **Not measured: a long meeting.** At 8–11 tok/s, every 1,000 transcript tokens costs roughly 1.5–2 minutes of prompt evaluation alone, and a 60-minute meeting runs to many thousands of tokens across several chunks. So the minutes for a 1-hour meeting would take far longer than the 5–10 minute target on this CPU with the 8B. That is implied, not timed. Neither the 8B's nor a 4B's minutes quality has been scored on real meeting transcripts, and whether to change the model for low-power CPUs is the owner's decision ([roadmap.md](roadmap.md) risk 14). The shipped model is unchanged.
 
 ### Self-measurement is built in
 
@@ -246,17 +281,18 @@ One model, on every machine (`system::LLM_MODEL_ID`):
 |---|---|---|
 | `qwen3-8b-q4` | Qwen3 8B Q4_K_M | ~4.8 GB of weights (5,027,783,488 bytes). 8,192-token context, q8_0 KV cache. Estimated ~6 GB of process RAM; advisory budget 7,000 MB. |
 
-The former 4B/8B split by memory tier is gone, and Gemma3-4B survives only as a bench-only `compare` candidate (see [Comparing candidates](#comparing-candidates-setup-and-compare)). The minimum machine is now 16 GB and every machine runs the 8B. That choice rests on the 8B being the best-quality model that *should* fit 16 GB — **not** on it having been shown to fit, or to produce acceptable minutes on this project's audio. Neither has been checked.
+The former 4B/8B split by memory tier is gone, and Gemma3-4B survives only as a bench-only `compare` candidate (see [Comparing candidates](#comparing-candidates-setup-and-compare)). The minimum machine is now 16 GB and every machine runs the 8B. That choice rests on the 8B being the best-quality model that *should* fit 16 GB. Fit has since been shown on one machine (below). Acceptable minutes on this project's audio, and acceptable speed on a low-power CPU, have not.
 
-**Measured: q8_0 KV cache (the one real LLM number).** llama-server now runs with `--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0` (spellings verified against the pinned b10717 binary's `--help`). On Qwen3-**4B** Q4_K_M at 8,192 context, working set dropped from **3,604 MB (f16 KV) to 3,064 MB (q8_0 KV), ~540 MB less**. The 4B and 8B share a KV-cache shape (the code comment in `pipeline/llm/server.rs` calls it "a same-shape Qwen3 model"), so a similar saving is expected on the 8B — expected, not measured. The RAM estimate's KV coefficient in `CatalogEntry::estimated_llm_ram_mb` was lowered from 0.15 to 0.08 MB/token to match. **Unmeasured:** whether q8_0 KV changes minutes quality at all — compare `mom.json` from the same transcript with and without it.
+**Measured: q8_0 KV cache.** llama-server now runs with `--flash-attn on --cache-type-k q8_0 --cache-type-v q8_0` (spellings verified against the pinned b10717 binary's `--help`). On Qwen3-**4B** Q4_K_M at 8,192 context, working set dropped from **3,604 MB (f16 KV) to 3,064 MB (q8_0 KV), ~540 MB less**. The 4B and 8B share a KV-cache shape (the code comment in `pipeline/llm/server.rs` calls it "a same-shape Qwen3 model"), so a similar saving is expected on the 8B — expected, not measured. The RAM estimate's KV coefficient in `CatalogEntry::estimated_llm_ram_mb` was lowered from 0.15 to 0.08 MB/token to match. **Unmeasured:** whether q8_0 KV changes minutes quality at all — compare `mom.json` from the same transcript with and without it.
 
-**Unmeasured, and the top open risk: Qwen3-8B on a 16 GB machine.** What to measure, on a real 16 GB laptop with a normal set of background apps open:
+**Qwen3-8B on a 16 GB machine: fit answered, speed is the open risk.** Measured on 2026-11-20 on the i7-1260P with ordinary apps open ([above](#qwen3-8b-on-a-16-gb-laptop-2026-11-20)):
 
-- **Peak RAM** of `llama-server.exe` through a full MoM run (`bench_cli llm` reports it), against the ~6 GB estimate and the 7,000 MB budget.
-- **Generation time for a 60-minute meeting**, and what it does to the 10-minute processing target — the target was already at risk before the LLM stage existed.
-- **Whether it fits alongside Windows at all**: does `preflight_memory` (which wants ~7.5 GB *free*) pass on a typical 16 GB machine, does the system page heavily during generation, and does the rest of the machine stay usable. *Partly answered (2026-11-19), and not in its favour:* on the i7-1260P with ordinary apps open it did not pass — 4,921 and 6,079 MB free against 7,550 MB needed ([above](#runtime-isolation-and-the-first-in-app-run-2026-11-19)). Whether it passes once a browser is closed, and what the model then actually uses, is still unmeasured.
+- **Fit: answered.** Valid minutes from 6,287 MB free and from 4,822 MB free. Windows trimmed other applications and left part of the weights on disk, without heavy paging during generation. Peak working set was 8,349 MB (private ~4.1 GB) in the unpressured run and ~4.7–5.2 GB under pressure. `preflight_memory` now asks for ~4,852 MB free.
+- **Speed: the open risk.** Through llama-server, 8–11 tok/s prompt and 2.5–3.1 tok/s generation, about half a 4B's speed, with the CPU as the limit. **Generation time for a 60-minute meeting** is unmeasured; the rates imply it is far outside the 5–10 minute target on this CPU. Nothing has been measured on a faster machine.
+- **Quality: unmeasured.** No minutes from the 8B, or from any alternative, have been scored on a real multi-speaker meeting transcript. The owner's 8B-against-4B decision for low-power CPUs needs that comparison ([roadmap.md](roadmap.md) backlog).
+- **Still to check:** whether the rest of the machine stays usable while the 8B runs with available RAM at a few hundred MB, and how the threshold behaves on machines other than this one.
 
-If it does not fit, the fallback is not a return to tiers but a smaller single model for everyone; re-evaluating newer ~8B models is on the [roadmap.md](roadmap.md) backlog.
+If the 8B is replaced, the replacement is a single model for everyone, not a return to tiers; re-evaluating other models is on the [roadmap.md](roadmap.md) backlog.
 
 ## Unmeasured: the audio and classifier defaults
 
@@ -470,7 +506,7 @@ _Not yet run._ Record the real speaker count next to each table so reported ids 
 
 ### Phase 6 — LLM
 
-_Not yet run._ Score `mom.json` against the quality rubric — factual accuracy, action-item/decision quality, Tamil handling, hallucination resistance. Record the machine's total RAM beside every row: the first run that matters is Qwen3-8B on a 16 GB machine, and a model that does not fit there does not fit the product, whatever its quality.
+_Not yet run as `bench_cli llm`._ Qwen3-8B's first load, generate and RAM figures came from `compare` on 2026-11-20 ([above](#qwen3-8b-on-a-16-gb-laptop-2026-11-20)), and its minutes were not scored. Score `mom.json` against the quality rubric — factual accuracy, action-item/decision quality, Tamil handling, hallucination resistance. Record the machine's total RAM beside every row: the first run that matters is Qwen3-8B on a 16 GB machine, and a model that does not fit there does not fit the product, whatever its quality.
 
 ### Phase 14 — Full pipeline
 

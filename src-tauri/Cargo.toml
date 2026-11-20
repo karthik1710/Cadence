@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 description = "Cadence — local-first meeting transcription and minutes-of-meeting app for Windows."
 license = "MIT"
 edition = "2021"

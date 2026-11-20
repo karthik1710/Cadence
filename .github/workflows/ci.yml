@@ -1,0 +1,69 @@
+# Build and test on every push to main and every pull request: the frontend
+# typecheck and bundle, then the Rust build and tests (including the
+# offline-guarantee suite). No models, runtimes or network access to model
+# hosts are needed. Release builds are .github/workflows/release.yml.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Build and test (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version; cargo --version
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: src-tauri -> target
+          # Pull requests restore main's cache but never write their own, so a
+          # PR cannot seed what later builds of main restore.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Typecheck frontend
+        run: npx tsc --noEmit
+
+      # Also produces dist/, which the Rust build embeds.
+      - name: Build frontend
+        run: npm run build
+
+      - name: Build Rust
+        working-directory: src-tauri
+        run: cargo build --locked
+
+      - name: Test Rust
+        working-directory: src-tauri
+        run: cargo test --locked

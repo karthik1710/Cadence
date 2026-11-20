@@ -29,6 +29,18 @@
     CADENCE_REQUIRE_SIGNING=1        Fail instead of warning when no identity
                                      is configured. `npm run release` sets it,
                                      so a release can never ship unsigned.
+    CADENCE_SIGN_FAILURE_LOG         A file every failure is appended to.
+                                     `npm run release` sets it and checks it
+                                     after the build, because makensis runs
+                                     this script for the uninstaller
+                                     (!uninstfinalize) without checking its
+                                     exit code: a failure there would
+                                     otherwise ship an unsigned uninstaller
+                                     inside a "successful" release build.
+
+  CI release builds (.github/workflows/release.yml) do not use this script for
+  Cadence's own binaries; they sign through SignPath, via
+  scripts/ci-sign-hook.ps1. See docs/release.md.
 
   A file that already carries a valid signature is left as it is: an upstream
   binary its publisher signed keeps that publisher's signature and
@@ -42,6 +54,20 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Every failure below - a throw, or Write-Error under 'Stop' - lands here: it
+# is recorded for `npm run release` and the script exits non-zero.
+trap {
+    if ($env:CADENCE_SIGN_FAILURE_LOG) {
+        try {
+            Add-Content -LiteralPath $env:CADENCE_SIGN_FAILURE_LOG -Value "${Path}: $($_.Exception.Message)" -Encoding utf8
+        } catch {
+            Write-Host "sign.ps1: could not record the failure in $($env:CADENCE_SIGN_FAILURE_LOG): $($_.Exception.Message)"
+        }
+    }
+    Write-Host "sign.ps1: FAILED: $($_.Exception.Message)"
+    exit 1
+}
 
 if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     throw "sign.ps1: no such file: $Path"

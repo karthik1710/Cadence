@@ -1,0 +1,479 @@
+# Builds the per-user NSIS installer on GitHub-hosted runners and, once the
+# project is accepted by SignPath Foundation and configured, signs it through
+# SignPath. Without the SignPath configuration it still produces an unsigned
+# installer. Design and setup: docs/release.md, "Release builds in CI".
+#
+#   build            First bundling pass (`tauri build`). Signing is deferred:
+#                    scripts/ci-sign-hook.ps1 collects Cadence's own binaries
+#                    (patched Cadence.exe, NSIS uninstaller) and leaves every
+#                    file unsigned. Its installer is the unsigned build.
+#   sign-binaries    SignPath signs Cadence.exe and uninstall.exe.
+#   bundle           Second pass (`tauri bundle`) from the same unpatched
+#                    Cadence.exe; the hook swaps in the signed copies, matched
+#                    by SHA-256, so the installer embeds signed binaries.
+#   sign-installer   SignPath signs the finished setup.exe.
+#   finalize         Verifies the final installer, adds SHA256SUMS.txt.
+#   release          Tags only: build provenance attestation + GitHub prerelease.
+#
+# Upstream runtime binaries (whisper.cpp, llama.cpp, sherpa-onnx) and NSIS
+# plugins are never sent to SignPath: SignPath Foundation's certificate may
+# sign only this project's own binaries (https://signpath.org/terms).
+#
+# Signing runs when the trigger asks for it (a v* tag push, or a manual run
+# with "sign" ticked) AND the repository variables SIGNPATH_ORGANIZATION_ID
+# and SIGNPATH_PROJECT_SLUG are set. The API token (secret
+# SIGNPATH_API_TOKEN) is only ever exposed to the two signing jobs, which run
+# no repository code. This workflow never runs for pull requests.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      sign:
+        description: Submit the build to SignPath (needs the SignPath variables and secret)
+        type: boolean
+        default: false
+      release_tag:
+        description: Also publish a GitHub prerelease with this tag, e.g. v0.1.0-rc.1 (default branch only; empty = workflow artifacts only)
+        type: string
+        default: ''
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Never cancel a run that may be waiting on a SignPath approval.
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (first pass, unsigned)
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      installer: ${{ steps.plan.outputs.installer }}
+      sign: ${{ steps.plan.outputs.sign }}
+      release_tag: ${{ steps.plan.outputs.release_tag }}
+      binaries_artifact_id: ${{ steps.upload-binaries.outputs.artifact-id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Plan
+        id: plan
+        shell: pwsh
+        env:
+          INPUT_SIGN: ${{ inputs.sign }}
+          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $packageVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($packageVersion -ne $version) {
+            Write-Output "::error::package.json version ($packageVersion) differs from src-tauri/tauri.conf.json ($version)."
+            exit 1
+          }
+
+          $tag = ''
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $tag = $env:GITHUB_REF_NAME
+          } elseif ($env:INPUT_RELEASE_TAG) {
+            if ($env:GITHUB_REF -ne "refs/heads/$env:DEFAULT_BRANCH") {
+              Write-Output "::error::A release can only be published from $env:DEFAULT_BRANCH (this run is on $env:GITHUB_REF)."
+              exit 1
+            }
+            $tag = $env:INPUT_RELEASE_TAG
+          }
+          if ($tag -and $tag -ne "v$version") {
+            Write-Output "::error::Tag $tag does not match the app version $version; expected v$version."
+            exit 1
+          }
+
+          $requested = ($env:GITHUB_REF_TYPE -eq 'tag') -or ($env:INPUT_SIGN -eq 'true')
+          $configured = [bool]$env:SIGNPATH_ORGANIZATION_ID -and [bool]$env:SIGNPATH_PROJECT_SLUG
+          $sign = $requested -and $configured
+          if ($requested -and -not $configured) {
+            Write-Output '::warning::Signing was requested but SignPath is not configured (repository variables SIGNPATH_ORGANIZATION_ID / SIGNPATH_PROJECT_SLUG). Building UNSIGNED.'
+          }
+
+          $installer = "Cadence_${version}_x64-setup.exe"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "installer=$installer" >> $env:GITHUB_OUTPUT
+          "sign=$($sign.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "release_tag=$tag" >> $env:GITHUB_OUTPUT
+          "Version $version, installer $installer, sign=$sign, release tag '$tag'." | Write-Output
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version; cargo --version
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # No --features: the dev-cli feature (pipeline_cli, bench_cli) must stay
+      # out of the installer (src-tauri/Cargo.toml). The overlay swaps
+      # signCommand for scripts/ci-sign-hook.ps1. No signing identity is set,
+      # so scripts/prepare-runtimes.ps1 leaves the runtimes unsigned and
+      # writes their manifest from the bytes that ship.
+      - name: Build and bundle (collect pass)
+        shell: pwsh
+        env:
+          CADENCE_CI_SIGN_MODE: collect
+        run: npx tauri build --ci --config "$env:GITHUB_WORKSPACE\src-tauri\tauri.ci.conf.json" -- --locked
+
+      - name: Verify the unsigned installer
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.plan.outputs.installer }}
+        run: |
+          ./scripts/ci-verify-installer.ps1 -Installer "src-tauri/target/release/bundle/nsis/$env:INSTALLER" -Expect Unsigned
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Upload the unsigned installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Cadence-${{ steps.plan.outputs.version }}-unsigned-installer
+          path: src-tauri/target/release/bundle/nsis/${{ steps.plan.outputs.installer }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stage inputs for the signed pass
+        if: steps.plan.outputs.sign == 'true'
+        shell: pwsh
+        run: |
+          foreach ($name in 'Cadence.exe', 'uninstall.exe') {
+            if (-not (Test-Path "src-tauri/target/ci-sign/unsigned/$name")) {
+              Write-Output "::error::The collect pass did not capture $name; see the ci-sign-hook lines in the build log."
+              exit 1
+            }
+          }
+          # Tauri restores the unpatched Cadence.exe after bundling. The second
+          # pass starts from it, so it reproduces the patched bytes exactly.
+          New-Item -ItemType Directory -Force bundle-inputs | Out-Null
+          Copy-Item src-tauri/target/release/Cadence.exe bundle-inputs/
+          Copy-Item src-tauri/target/ci-sign/unsigned-map.json bundle-inputs/
+
+      - name: Upload binaries for SignPath
+        id: upload-binaries
+        if: steps.plan.outputs.sign == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-input-binaries
+          path: src-tauri/target/ci-sign/unsigned/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload inputs for the signed pass
+        if: steps.plan.outputs.sign == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bundle-inputs
+          path: bundle-inputs/
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-binaries:
+    name: Sign Cadence.exe and uninstaller (SignPath)
+    needs: build
+    if: needs.build.outputs.sign == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    environment: signpath
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check the SignPath API token
+        env:
+          TOKEN_PRESENT: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+        run: |
+          if [ "$TOKEN_PRESENT" != "true" ]; then
+            echo "::error::Secret SIGNPATH_API_TOKEN is not set (repository secret, or a secret of the 'signpath' environment)."
+            exit 1
+          fi
+
+      # Waits for the manual approval SignPath Foundation requires for every
+      # release; the timeout is the repository variable SIGNPATH_WAIT_SECONDS.
+      - name: Submit signing request
+        uses: signpath/github-action-submit-signing-request@4a84eb4ad763290f059275786f2deed97c2c672b # v3.1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_BINARIES_CONFIG_SLUG || 'cadence-binaries' }}
+          github-artifact-id: ${{ needs.build.outputs.binaries_artifact_id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: ${{ vars.SIGNPATH_WAIT_SECONDS || '7200' }}
+          output-artifact-directory: signed
+          parameters: |
+            version: ${{ toJSON(needs.build.outputs.version) }}
+
+      - name: Upload signed binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-output-binaries
+          path: signed/
+          if-no-files-found: error
+          retention-days: 7
+
+  bundle:
+    name: Bundle (second pass, signed binaries)
+    needs: [build, sign-binaries]
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    outputs:
+      installer_artifact_id: ${{ steps.upload-installer.outputs.artifact-id }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      # `tauri bundle` compiles nothing, but it reads `cargo metadata`.
+      - name: Set up Rust
+        shell: pwsh
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Download inputs for the signed pass
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-inputs
+          path: bundle-inputs
+
+      - name: Download signed binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signpath-output-binaries
+          path: src-tauri/target/ci-sign/signed
+
+      - name: Put the first pass's outputs in place
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force src-tauri/target/release | Out-Null
+          Copy-Item bundle-inputs/Cadence.exe src-tauri/target/release/Cadence.exe
+          Copy-Item bundle-inputs/unsigned-map.json src-tauri/target/ci-sign/unsigned-map.json
+          Get-ChildItem src-tauri/target/ci-sign/signed | Get-AuthenticodeSignature |
+            Format-Table @{ n = 'File'; e = { Split-Path -Leaf $_.Path } }, Status, @{ n = 'Signer'; e = { $_.SignerCertificate.Subject } } -AutoSize
+
+      - name: Bundle (apply pass)
+        shell: pwsh
+        env:
+          CADENCE_CI_SIGN_MODE: apply
+          CADENCE_CI_SIGN_STRICT: '1'
+          CADENCE_CI_EXPECTED_SIGNER: ${{ vars.SIGNPATH_EXPECTED_SIGNER || 'SignPath Foundation' }}
+        run: npx tauri bundle --ci --config "$env:GITHUB_WORKSPACE\src-tauri\tauri.ci.conf.json"
+
+      - name: Verify the installer before it is signed
+        shell: pwsh
+        env:
+          INSTALLER: ${{ needs.build.outputs.installer }}
+          EXPECTED_SIGNER: ${{ vars.SIGNPATH_EXPECTED_SIGNER || 'SignPath Foundation' }}
+        run: |
+          ./scripts/ci-verify-installer.ps1 -Installer "src-tauri/target/release/bundle/nsis/$env:INSTALLER" `
+            -Expect Unsigned -ExpectContents Signed -ExpectedSigner $env:EXPECTED_SIGNER -SignDir src-tauri/target/ci-sign
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Upload installer for SignPath
+        id: upload-installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-input-installer
+          path: src-tauri/target/release/bundle/nsis/${{ needs.build.outputs.installer }}
+          if-no-files-found: error
+          retention-days: 7
+
+  sign-installer:
+    name: Sign installer (SignPath)
+    needs: [build, bundle]
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    environment: signpath
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Submit signing request
+        uses: signpath/github-action-submit-signing-request@4a84eb4ad763290f059275786f2deed97c2c672b # v3.1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLER_CONFIG_SLUG || 'cadence-installer' }}
+          github-artifact-id: ${{ needs.bundle.outputs.installer_artifact_id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: ${{ vars.SIGNPATH_WAIT_SECONDS || '7200' }}
+          output-artifact-directory: signed
+          parameters: |
+            version: ${{ toJSON(needs.build.outputs.version) }}
+
+      - name: Upload signed installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signpath-output-installer
+          path: signed/
+          if-no-files-found: error
+          retention-days: 7
+
+  finalize:
+    name: Verify and checksum the installer
+    needs: [build, sign-installer]
+    # Runs for unsigned builds (signing jobs skipped) and for signed builds
+    # whose signing succeeded; never after a failed or cancelled signing run.
+    if: >-
+      !cancelled() && needs.build.result == 'success' &&
+      (needs.build.outputs.sign != 'true' || needs.sign-installer.result == 'success')
+    runs-on: windows-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.build.outputs.sign == 'true' && 'signpath-output-installer' || format('Cadence-{0}-unsigned-installer', needs.build.outputs.version) }}
+          path: dist-release
+
+      - name: Verify
+        shell: pwsh
+        env:
+          INSTALLER: ${{ needs.build.outputs.installer }}
+          SIGNED: ${{ needs.build.outputs.sign }}
+          EXPECTED_SIGNER: ${{ vars.SIGNPATH_EXPECTED_SIGNER || 'SignPath Foundation' }}
+        run: |
+          $expect = if ($env:SIGNED -eq 'true') { 'Signed' } else { 'Unsigned' }
+          ./scripts/ci-verify-installer.ps1 -Installer "dist-release/$env:INSTALLER" -Expect $expect -ExpectedSigner $env:EXPECTED_SIGNER
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Write SHA256SUMS.txt
+        shell: pwsh
+        env:
+          INSTALLER: ${{ needs.build.outputs.installer }}
+        run: |
+          $hash = (Get-FileHash -LiteralPath "dist-release/$env:INSTALLER" -Algorithm SHA256).Hash.ToLowerInvariant()
+          # sha256sum format: two spaces, then the file name.
+          [System.IO.File]::WriteAllText("$PWD/dist-release/SHA256SUMS.txt", "$hash  $env:INSTALLER`n")
+          Get-Content dist-release/SHA256SUMS.txt
+
+      - name: Upload the final installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Cadence-${{ needs.build.outputs.version }}-${{ needs.build.outputs.sign == 'true' && 'signed' || 'unsigned' }}
+          path: |
+            dist-release/${{ needs.build.outputs.installer }}
+            dist-release/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  release:
+    name: Publish GitHub prerelease
+    needs: [build, finalize]
+    if: >-
+      !cancelled() && needs.finalize.result == 'success' && needs.build.outputs.release_tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write      # create the release and upload its assets
+      id-token: write      # Sigstore certificate for the attestation
+      attestations: write  # store the attestation
+    steps:
+      - name: Download the final installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: Cadence-${{ needs.build.outputs.version }}-${{ needs.build.outputs.sign == 'true' && 'signed' || 'unsigned' }}
+          path: dist-release
+
+      - name: Check the checksum
+        working-directory: dist-release
+        run: sha256sum --check SHA256SUMS.txt
+
+      # SLSA build provenance for the exact bytes published (signed or not),
+      # verifiable with `gh attestation verify`. No artifact-metadata
+      # permission: that is only for registry storage records.
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist-release/${{ needs.build.outputs.installer }}
+
+      - name: Create or update the prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.release_tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          INSTALLER: ${{ needs.build.outputs.installer }}
+          SIGNED: ${{ needs.build.outputs.sign }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          policy="$SERVER_URL/$GITHUB_REPOSITORY/blob/$TAG/docs/code-signing-policy.md"
+          if [ "$SIGNED" = "true" ]; then
+            title="Cadence $VERSION"
+            signing="The installer, \`Cadence.exe\` and the uninstaller are Authenticode-signed. Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). The bundled third-party runtimes (whisper.cpp, llama.cpp, sherpa-onnx) are upstream builds and are not signed. See the [code signing policy]($policy)."
+          else
+            title="Cadence $VERSION (unsigned test build)"
+            signing="**This build is not code-signed.** Windows SmartScreen will warn before running it, and some endpoint-security products may block it. Check the file against \`SHA256SUMS.txt\` and the build provenance attestation below before running it. See the [code signing policy]($policy)."
+          fi
+          {
+            echo "Pre-alpha. Per-user installer for Windows 10/11 x64: installs to \`%LOCALAPPDATA%\\Cadence\` without administrator rights. AI models are downloaded after installation, only once you agree to the list shown in the app."
+            echo
+            echo "## Code signing policy"
+            echo
+            echo "$signing"
+            echo
+            echo "## Verifying this download"
+            echo
+            echo '```'
+            echo "gh attestation verify $INSTALLER --repo $GITHUB_REPOSITORY"
+            echo '```'
+            echo
+            echo "SHA-256: \`$(cut -d' ' -f1 dist-release/SHA256SUMS.txt)\`"
+          } > notes.md
+
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" "dist-release/$INSTALLER" dist-release/SHA256SUMS.txt --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$TAG" --title "$title" --notes-file notes.md --prerelease --repo "$GITHUB_REPOSITORY"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            gh release create "$TAG" "dist-release/$INSTALLER" dist-release/SHA256SUMS.txt \
+              --verify-tag --prerelease --title "$title" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" "dist-release/$INSTALLER" dist-release/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" --prerelease --title "$title" --notes-file notes.md --repo "$GITHUB_REPOSITORY"
+          fi

@@ -1,0 +1,11 @@
+# Keeps the commit-SHA pins on GitHub Actions current. Only GitHub Actions:
+# npm and Cargo updates stay deliberate, manual changes.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ['*']

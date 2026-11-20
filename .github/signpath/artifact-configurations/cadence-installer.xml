@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration, slug "cadence-installer" (repository
+  variable SIGNPATH_INSTALLER_CONFIG_SLUG overrides the slug).
+
+  Signs the finished per-user NSIS installer, Cadence_<version>_x64-setup.exe,
+  which .github/workflows/release.yml uploads as a GitHub artifact zip holding
+  only that file. By then the installer already contains the Cadence.exe and
+  uninstaller signed through "cadence-binaries".
+
+  SignPath has no NSIS container format, so it signs the installer as a plain
+  PE file and does not look inside it. The upstream runtime binaries in it are
+  unsigned, as SignPath Foundation's terms permit for files bundled in a
+  signed installer (https://signpath.org/terms).
+
+  This file is the reviewed source of truth. SignPath does not read it from
+  the repository: paste it into the project's artifact configuration, and keep
+  the two in step.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="Cadence_${version}_x64-setup.exe" product-name="Cadence" product-version="${version}">
+      <authenticode-sign description="Cadence installer" description-url="https://github.com/karthik1710/Cadence" />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

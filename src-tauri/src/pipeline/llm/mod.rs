@@ -195,12 +195,23 @@ fn preflight_memory(
     host: &HostInfo,
 ) -> Result<(), String> {
     let estimated = entry.estimated_llm_ram_mb(context_tokens);
-    // Keep a headroom slice for Windows, the webview, and the file cache.
-    let headroom_mb = 1_500;
+    // "Available" RAM understates what the model can get. The weights are
+    // memory-mapped, so Windows can leave part of the file on disk and read
+    // it back on demand, and it trims idle applications' working sets to
+    // make room. Measured 2026-11-20 on a 16 GB i7-1260P with ordinary apps
+    // open: Qwen3-8B at 8K context ran to valid minutes from 6,287 MB free,
+    // and again from 4,822 MB free (about 20% slower, working set held near
+    // 4.8 GB, private memory ~4.1 GB). The old rule — estimate plus 1.5 GB of
+    // headroom, 7,550 MB — refused every one of those runs. So the check asks
+    // for the estimate minus the share of the weights Windows was seen to
+    // keep on disk without the run thrashing (a quarter), and no headroom:
+    // a quarter of this model is ~1.2 GB, giving ~4.85 GB, just above the
+    // lowest point measured to work. Below that is untested, so refused.
+    let paged_weights_mb = entry.approx_size_mb / 4;
     // The free RAM the check actually asks for. The message quotes this
-    // number, not the bare estimate: a user who frees exactly the estimate
-    // would otherwise be refused again with the same message.
-    let required_free_mb = estimated + headroom_mb;
+    // number, not the bare estimate: a user who frees exactly the quoted
+    // amount must pass.
+    let required_free_mb = estimated.saturating_sub(paged_weights_mb);
     if required_free_mb > host.available_ram_mb {
         // There is no smaller model to fall back to — every machine runs the
         // same one — so the advice is about freeing memory. The transcript is
@@ -212,12 +223,12 @@ fn preflight_memory(
         };
         let shortfall_mb = required_free_mb - host.available_ram_mb;
         return Err(format!(
-            "Writing the minutes with {} needs about {} MB of free RAM ({} MB for the model at a {} token context, plus {} MB kept free for Windows and Cadence), but only {} MB is free on this machine ({} MB total). Close other applications (browsers especially) to free at least {} MB more, then regenerate the minutes. Cadence needs a machine with at least 16 GB of RAM{minimum_note}.",
+            "Writing the minutes with {} needs about {} MB of free RAM ({} MB for the model at a {} token context, less about {} MB of it that Windows can leave on disk while it runs), but only {} MB is free on this machine ({} MB total). Close other applications (browsers especially) to free at least {} MB more, then regenerate the minutes. Cadence needs a machine with at least 16 GB of RAM{minimum_note}.",
             entry.label,
             required_free_mb,
             estimated,
             context_tokens,
-            headroom_mb,
+            paged_weights_mb,
             host.available_ram_mb,
             host.total_ram_mb,
             shortfall_mb
@@ -485,6 +496,22 @@ mod tests {
         };
         let err = preflight_memory(entry, system::LLM_CONTEXT_TOKENS, &host).unwrap_err();
         assert!(err.contains("this machine has less"), "{err}");
+    }
+
+    #[test]
+    fn the_free_ram_the_8b_was_measured_to_run_in_is_not_refused() {
+        // 2026-11-20, 16 GB i7-1260P: valid minutes from 6,287 MB free and
+        // from 4,900 MB free (4,822 at the moment the run started; the
+        // threshold sits just above that, so use the round figure the
+        // pressure test targeted).
+        let entry = models_manager::entry(system::LLM_MODEL_ID).unwrap();
+        for available_ram_mb in [6_287, 4_900] {
+            let host = HostInfo { total_ram_mb: 16_008, available_ram_mb, logical_cores: 16 };
+            assert!(
+                preflight_memory(entry, system::LLM_CONTEXT_TOKENS, &host).is_ok(),
+                "refused at {available_ram_mb} MB free"
+            );
+        }
     }
 
     #[test]

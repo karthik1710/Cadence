@@ -37,7 +37,7 @@ It is built for real-world mixed-language meetings: **English, Tamil, and code-s
 - 🤐 **Unparliamentary-language handling** — flag, mask (`f***`) or expunge profanity in the transcript, its exports, and the minutes. Detection *annotates*; it never rewrites `transcript.json`, so the policy is adjustable after the fact and a wrong flag is reversible. Terms are an editable word list, not code.
 - 🔍 **Searchable history** — browse past meetings, search within a transcript, jump to any timestamp and replay the audio.
 - 📤 **Export** — Markdown and JSON today, PDF/DOCX planned.
-- 🧩 **Model management** — the native runtimes (whisper.cpp, llama.cpp, sherpa-onnx) ship inside the signed installer, so first-run setup downloads model data only: a consent-gated screen that lists every download before anything is fetched, then install, verify, reinstall and clean up from Settings. SHA-256 digests are recorded at install; verifying a runtime checks every file in its folder. Downloads run one at a time and never during a recording or while a meeting is processing.
+- 🧩 **Model management** — the native runtimes (whisper.cpp, llama.cpp, sherpa-onnx) ship inside the installer (not yet code-signed), so first-run setup downloads model data only: a consent-gated screen that lists every download before anything is fetched, then install, verify, reinstall and clean up from Settings. SHA-256 digests are recorded at install; verifying a runtime checks every file in its folder. Downloads run one at a time and never during a recording or while a meeting is processing.
 - ⚖️ **One model set, 16 GB minimum** — every machine runs the same models (Whisper small, Qwen3-8B), so a meeting is summarised the same way on any machine; only thread counts adapt to the CPU. Before writing minutes it checks free RAM, and if there is not enough, it says how much to free and keeps the transcript safe.
 
 ## How it works
@@ -160,9 +160,21 @@ There is no ESLint/Prettier config and no JS test runner: `npm run build` is the
 | `prepare-runtimes.ps1` says an archive does not match its pinned SHA-256 | Upstream changed the release file, or the download was corrupted. Do not edit the pin to make it pass; re-verify the release first |
 | Long speech collapses into one short line | whisper.cpp must be invoked with `--max-len 80 --split-on-word --max-context 0`; see [docs/benchmarks.md](docs/benchmarks.md) |
 | Port 1420 already in use | Another `tauri dev` is running; stop it before starting a new one |
-| Transcript appears but minutes are refused for lack of free RAM | The 8B needs about 7.5 GB *free*; close other applications (browsers especially), then use "Generate minutes". The transcript is already saved |
+| Transcript appears but minutes are refused for lack of free RAM | The 8B needs about 4.9 GB *free*; close other applications (browsers especially), then use "Generate minutes". The transcript is already saved |
 | A model install is refused | Installs run one at a time and never during a recording or processing; wait for that to finish |
 | Verify says a runtime shares DLLs with the other runtimes | It was installed by an older build into the shared `bin\` folder; Reinstall moves it into its own folder |
+
+## Releases and code signing
+
+Installers are built from this repository by GitHub Actions ([release workflow](.github/workflows/release.yml)) and published on the [Releases page](https://github.com/karthik1710/Cadence/releases). Each one comes with a `SHA256SUMS.txt` and a build provenance attestation (`gh attestation verify <installer> --repo karthik1710/Cadence`).
+
+**Releases are not code-signed yet**, so Windows SmartScreen warns before an installer runs. Those builds are labelled "unsigned test build". The project intends to apply for free open-source code signing from SignPath Foundation. **[Code signing policy](docs/code-signing-policy.md)**: what is and is not signed, who approves signing, and the privacy statement.
+
+<!-- Enable once SignPath Foundation has accepted the project (replace the "not code-signed yet" paragraph):
+Windows releases are code-signed. Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). See the [code signing policy](docs/code-signing-policy.md).
+-->
+
+How the pipeline builds and signs, and how to check an installer, is in [docs/release.md](docs/release.md#release-builds-in-ci).
 
 ## Project structure
 
@@ -198,7 +210,7 @@ What is captured, what is logged, how deletion works and how model integrity is 
 
 ## Project status
 
-**Pre-alpha, actively in development.** The full local pipeline — recording, audio clean-up and profiling, STT, diarization, alignment, MoM generation, classification, history, export and model management — is implemented, with one model set for every machine and a 16 GB minimum. The crate builds clean and its Rust tests pass, including a 15-test suite asserting the no-network guarantee. One short real recording has been through the app to a transcript; minutes have not, because on the 16 GB laptop tried the LLM's free-RAM check refused the 8B, which has still never run anywhere. What is still open: the STT/diarization/LLM model and threshold choices remain provisional, and so does every number in the audio and classifier stages — the leveler and compressor settings, the noise-reduction strength, the noise classifier's thresholds, the quality score and the meeting-type weights are reasoned defaults, not measurements. The word-level alignment split has met real multi-speaker audio on one broadcast clip only, and no meeting containing flagged language has been through the masked-minutes path. Real-audio numbers exist for two English clips; no Tamil/Tanglish recording has been through any of it. Nothing here is ready to run an unattended meeting yet. [docs/roadmap.md](docs/roadmap.md) tracks status, open risks and the backlog.
+**Pre-alpha, actively in development.** The full local pipeline — recording, audio clean-up and profiling, STT, diarization, alignment, MoM generation, classification, history, export and model management — is implemented, with one model set for every machine and a 16 GB minimum. The crate builds clean and its Rust tests pass, including a 15-test suite asserting the no-network guarantee. One short real recording has been through the app to a transcript; minutes have been produced from it outside the app UI: on a 16 GB i7-1260P laptop the 8B ran to valid minutes from as little as ~4.8 GB free (2026-11-20), but slowly — a few minutes for a 28-second clip — so minutes speed on low-power CPUs is now the main open risk. What is still open: the STT/diarization/LLM model and threshold choices remain provisional, and so does every number in the audio and classifier stages — the leveler and compressor settings, the noise-reduction strength, the noise classifier's thresholds, the quality score and the meeting-type weights are reasoned defaults, not measurements. The word-level alignment split has met real multi-speaker audio on one broadcast clip only, and no meeting containing flagged language has been through the masked-minutes path. Real-audio numbers exist for two English clips; no Tamil/Tanglish recording has been through any of it. Nothing here is ready to run an unattended meeting yet. [docs/roadmap.md](docs/roadmap.md) tracks status, open risks and the backlog.
 
 ## Documentation
 
